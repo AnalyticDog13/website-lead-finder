@@ -132,37 +132,35 @@ ScrapeGraphAI visits the website and extracts:
 
 ## Dashboard UI
 
+Plain HTML, no styling framework. Browser defaults are fine. Function over form.
+
+**Layout (top to bottom):**
+
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│  LA Lead Finder                                 [Export CSV ⬇]   │
-├──────────────────────────────────────────────────────────────────┤
-│  Category: [All ▼]  Score: [≤5 ▼]  Status: [All ▼]             │
-│  [▶ Run Scrape]  Category: [Barbers ▼]  Limit: [100]           │
-│  ████████████░░░░░░░  47/100 — "Scoring cuts4u.weebly.com..."  │
-├──────────────────────────────────────────────────────────────────┤
-│  Auto-leads 23  │  Review Queue 41  │  Skipped 6               │
-├──────────────────────────────────────────────────────────────────┤
-│ ┌────────────────────────────────────────────────────────────┐   │
-│ │ Cuts by Marco                           [✅ Lead] [Skip]   │   │
-│ │ Barber Shop · Google              Score: 3/10              │   │
-│ │ 📞 (310) 555-0192  ✉ marco@cutsbymarco.com                │   │
-│ │ 🌐 cutsbymarco.weebly.com                  [Visit Site ↗] │   │
-│ │ ⚠ No HTTPS · No mobile layout · Last updated 2014         │   │
-│ │ 📝 Notes: ________________________________                 │   │
-│ └────────────────────────────────────────────────────────────┘   │
-└──────────────────────────────────────────────────────────────────┘
+LA Lead Finder
+
+[Run Scrape]  Category: [Barbers ▼]  Limit: [____]
+Progress: 47/100 — Scoring cutsbymarco.weebly.com...
+
+Filter: Category [All ▼]  Status [All ▼]  [Export CSV]
+
+Tabs: [Auto-leads (23)] [Review Queue (41)] [Skipped (6)]
+
+---
+Table with columns:
+  Business | Category | Phone | Email | Website | Score | Notes | Status | Actions
+---
+Row: Cuts by Marco | Barber | (310)555-0192 | marco@... | cutsbymarco.weebly.com [open] | 3/10 – No HTTPS, no mobile | [text input] | [Lead] [Skip]
+Row: Silver Lake Coffee | Coffee | (323)555-0847 | — | No website | — | [text input] | [Lead] [Skip]
 ```
 
-**Three tabs:**
-1. **Auto-leads** — no website, or 2+ tech flags
-2. **Review Queue** — technically ok but AI scored ≤ 7, or undecided
-3. **Skipped** — dismissed, but recoverable
-
-**Per-card interactions:**
-- "Visit Site" → opens business website in new tab for manual eyeballing
-- Lead / Skip toggle → updates status in DB instantly
-- Notes field → auto-saves on blur
-- Export CSV → only includes records with status = "lead"
+**Interactions:**
+- "Run Scrape" button kicks off the job; progress line updates live via SSE
+- New rows appear in the table as each lead streams in
+- "open" link next to website opens it in a new tab for manual review
+- Lead / Skip buttons update status instantly
+- Notes text input auto-saves on blur
+- Export CSV downloads only rows with status = "lead"
 
 ---
 
