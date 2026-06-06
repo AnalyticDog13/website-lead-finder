@@ -36,3 +36,43 @@ def test_flags_unreachable_site():
     with patch("scraper.requests.get", side_effect=Exception("Connection refused")):
         result = check_website_quality("https://dead-site.com")
     assert any("unreachable" in f.lower() for f in result["flags"])
+
+from scraper import search_google_places
+
+def test_search_google_places_returns_list():
+    mock_client = MagicMock()
+    mock_client.places.return_value = {
+        "results": [{"place_id": "abc123", "name": "Test Barber"}]
+    }
+    mock_client.place.return_value = {
+        "result": {
+            "name": "Test Barber",
+            "formatted_phone_number": "(310) 555-0001",
+            "website": "http://testbarber.com",
+            "formatted_address": "123 Main St, Los Angeles CA",
+        }
+    }
+
+    with patch("scraper.googlemaps.Client", return_value=mock_client), \
+         patch.dict("os.environ", {"GOOGLE_PLACES_API_KEY": "fake-key"}):
+        results = search_google_places("barber shops", limit=1)
+
+    assert len(results) == 1
+    assert results[0]["name"] == "Test Barber"
+    assert results[0]["phone"] == "(310) 555-0001"
+    assert results[0]["website"] == "http://testbarber.com"
+    assert results[0]["source"] == "Google"
+
+def test_search_google_places_handles_missing_fields():
+    mock_client = MagicMock()
+    mock_client.places.return_value = {
+        "results": [{"place_id": "abc123"}]
+    }
+    mock_client.place.return_value = {"result": {}}
+
+    with patch("scraper.googlemaps.Client", return_value=mock_client), \
+         patch.dict("os.environ", {"GOOGLE_PLACES_API_KEY": "fake-key"}):
+        results = search_google_places("barber shops", limit=1)
+
+    assert results[0]["phone"] == ""
+    assert results[0]["website"] == ""
