@@ -18,6 +18,10 @@ CATEGORIES = [
     "freelancers",
     "real estate agents",
     "workout yoga studios",
+    "moving companies",
+    "lawn services",
+    "bike repair shops",
+    "watch repair shops",
 ]
 
 def check_website_quality(url: str) -> dict:
