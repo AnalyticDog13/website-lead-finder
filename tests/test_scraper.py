@@ -196,12 +196,12 @@ def test_run_scrape_pipeline_streams_leads():
          patch("scraper.insert_lead", return_value=1):
 
         from models import Lead
-        from datetime import datetime
+        from datetime import datetime, timezone
         mock_lead = Lead(
             business_name="Test", category="barber shop", phone="111",
             email="", website_url="", has_website=False, quality_score=None,
             quality_notes="No website", source="Google", address="LA",
-            status="lead", user_notes="", scraped_at=datetime.utcnow().isoformat(), id=1,
+            status="lead", user_notes="", scraped_at=datetime.now(timezone.utc).isoformat(), id=1,
         )
         mock_process.return_value = mock_lead
 

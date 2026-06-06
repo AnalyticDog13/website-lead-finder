@@ -2,7 +2,7 @@ import asyncio
 import os
 import time
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, timezone
 
 import requests
 import googlemaps
@@ -189,7 +189,7 @@ def process_business(biz: dict, category: str, db_path: str = "leads.db") -> Lea
         address=biz.get("address", ""),
         status=status,
         user_notes="",
-        scraped_at=datetime.utcnow().isoformat(),
+        scraped_at=datetime.now(timezone.utc).isoformat(),
     )
     lead.id = insert_lead(lead, db_path)
     return lead

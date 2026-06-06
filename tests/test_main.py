@@ -8,7 +8,7 @@ os.environ.setdefault("OPENAI_API_KEY", "fake")
 
 from main import app
 from models import init_db, insert_lead, Lead
-from datetime import datetime
+from datetime import datetime, timezone
 
 DB_PATH = "test_main.db"
 
@@ -27,7 +27,7 @@ def make_lead(**kwargs):
         business_name="Test Biz", category="barber shop", phone="310-555-0001",
         email="", website_url="", has_website=False, quality_score=None,
         quality_notes="No website", source="Google", address="LA",
-        status="review", user_notes="", scraped_at=datetime.utcnow().isoformat(),
+        status="review", user_notes="", scraped_at=datetime.now(timezone.utc).isoformat(),
     )
     defaults.update(kwargs)
     return Lead(**defaults)
