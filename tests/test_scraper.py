@@ -139,3 +139,79 @@ def test_score_website_with_ai_handles_failure():
 
     assert result["score"] is None
     assert result["email"] == ""
+
+import asyncio
+from scraper import deduplicate, process_business, run_scrape_pipeline
+
+def test_deduplicate_removes_same_name():
+    businesses = [
+        {"name": "Test Barber", "phone": "111", "website": "", "address": "123 Main", "source": "Google"},
+        {"name": "test barber", "phone": "222", "website": "", "address": "123 Main", "source": "Yelp"},
+        {"name": "Other Shop", "phone": "333", "website": "", "address": "456 Oak", "source": "Yelp"},
+    ]
+    result = deduplicate(businesses)
+    assert len(result) == 2
+    assert result[0]["name"] == "Test Barber"
+
+def test_process_business_no_website_is_auto_lead():
+    biz = {"name": "No Web Biz", "phone": "111", "website": "", "address": "LA", "source": "Google"}
+
+    with patch("scraper.check_website_quality") as mock_check, \
+         patch("scraper.score_website_with_ai") as mock_score, \
+         patch("scraper.insert_lead", return_value=1):
+        result = process_business(biz, "barber shop")
+
+    assert result.status == "lead"
+    assert result.has_website is False
+    mock_check.assert_not_called()
+    mock_score.assert_not_called()
+
+def test_process_business_two_flags_is_auto_lead():
+    biz = {"name": "Bad Site", "phone": "111", "website": "http://bad.com", "address": "LA", "source": "Google"}
+
+    with patch("scraper.check_website_quality", return_value={"flags": ["No HTTPS", "No mobile viewport"], "flag_count": 2}), \
+         patch("scraper.score_website_with_ai") as mock_score, \
+         patch("scraper.insert_lead", return_value=1):
+        result = process_business(biz, "barber shop")
+
+    assert result.status == "lead"
+    mock_score.assert_not_called()
+
+def test_process_business_high_ai_score_is_skipped():
+    biz = {"name": "Good Site", "phone": "111", "website": "https://good.com", "address": "LA", "source": "Google"}
+
+    with patch("scraper.check_website_quality", return_value={"flags": [], "flag_count": 0}), \
+         patch("scraper.score_website_with_ai", return_value={"score": 9, "notes": "Great site", "email": ""}), \
+         patch("scraper.insert_lead", return_value=1):
+        result = process_business(biz, "barber shop")
+
+    assert result.status == "skipped"
+
+def test_run_scrape_pipeline_streams_leads():
+    biz = {"name": "Test", "phone": "111", "website": "", "address": "LA", "source": "Google"}
+
+    with patch("scraper.search_google_places", return_value=[biz]), \
+         patch("scraper.search_yelp", return_value=[]), \
+         patch("scraper.process_business") as mock_process, \
+         patch("scraper.insert_lead", return_value=1):
+
+        from models import Lead
+        from datetime import datetime
+        mock_lead = Lead(
+            business_name="Test", category="barber shop", phone="111",
+            email="", website_url="", has_website=False, quality_score=None,
+            quality_notes="No website", source="Google", address="LA",
+            status="lead", user_notes="", scraped_at=datetime.utcnow().isoformat(), id=1,
+        )
+        mock_process.return_value = mock_lead
+
+        queue = asyncio.Queue()
+        asyncio.run(run_scrape_pipeline("barber shop", 1, queue))
+
+        items = []
+        while not queue.empty():
+            items.append(queue.get_nowait())
+
+    types = [i["type"] for i in items]
+    assert "lead" in types
+    assert "done" in types

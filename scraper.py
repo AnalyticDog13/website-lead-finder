@@ -1,9 +1,15 @@
+import asyncio
 import os
 import time
+from dataclasses import asdict
+from datetime import datetime
+
 import requests
 import googlemaps
 from bs4 import BeautifulSoup
 from scrapegraphai.graphs import SmartScraperGraph
+
+from models import Lead, insert_lead
 
 CATEGORIES = [
     "photographers",
@@ -128,3 +134,81 @@ def search_yelp(category: str, limit: int) -> list:
             "source": "Yelp",
         })
     return businesses
+
+
+def deduplicate(businesses: list) -> list:
+    seen = set()
+    unique = []
+    for biz in businesses:
+        key = biz["name"].lower().strip()
+        if key not in seen:
+            seen.add(key)
+            unique.append(biz)
+    return unique
+
+
+def process_business(biz: dict, category: str, db_path: str = "leads.db") -> Lead:
+    website = biz.get("website", "")
+    has_website = bool(website)
+    quality_score = None
+    quality_notes = ""
+    email = ""
+    status = "review"
+
+    if not has_website:
+        status = "lead"
+        quality_notes = "No website"
+    else:
+        quality = check_website_quality(website)
+        flags = quality["flags"]
+        flag_count = quality["flag_count"]
+        quality_notes = " · ".join(flags) if flags else "Passed basic checks"
+
+        if flag_count >= 2:
+            status = "lead"
+        else:
+            ai = score_website_with_ai(website)
+            quality_score = ai["score"]
+            email = ai["email"]
+            if ai["notes"]:
+                quality_notes = f"{quality_notes} | AI: {ai['notes']}" if quality_notes else ai["notes"]
+
+            if quality_score is not None and quality_score >= 8:
+                status = "skipped"
+
+    lead = Lead(
+        business_name=biz["name"],
+        category=category,
+        phone=biz.get("phone", ""),
+        email=email,
+        website_url=website,
+        has_website=has_website,
+        quality_score=quality_score,
+        quality_notes=quality_notes,
+        source=biz.get("source", ""),
+        address=biz.get("address", ""),
+        status=status,
+        user_notes="",
+        scraped_at=datetime.utcnow().isoformat(),
+    )
+    lead.id = insert_lead(lead, db_path)
+    return lead
+
+
+async def run_scrape_pipeline(category: str, limit: int, queue: asyncio.Queue, db_path: str = "leads.db"):
+    google_results = await asyncio.to_thread(search_google_places, category, limit)
+    yelp_results = await asyncio.to_thread(search_yelp, category, limit)
+
+    businesses = deduplicate(google_results + yelp_results)[:limit]
+
+    for i, biz in enumerate(businesses):
+        await queue.put({
+            "type": "progress",
+            "current": i + 1,
+            "total": len(businesses),
+            "message": f"Processing {biz['name']}...",
+        })
+        lead = await asyncio.to_thread(process_business, biz, category, db_path)
+        await queue.put({"type": "lead", **asdict(lead)})
+
+    await queue.put({"type": "done"})
