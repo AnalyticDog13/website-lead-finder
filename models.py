@@ -1,5 +1,5 @@
 import sqlite3
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from typing import Optional
 
 @dataclass
@@ -63,18 +63,20 @@ def insert_lead(lead: Lead, db_path: str = "leads.db") -> int:
 def get_leads(db_path: str = "leads.db", category: str = None, status: str = None) -> list:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
-    query = "SELECT * FROM leads WHERE 1=1"
-    params = []
-    if category and category != "all":
-        query += " AND category = ?"
-        params.append(category)
-    if status and status != "all":
-        query += " AND status = ?"
-        params.append(status)
-    query += " ORDER BY scraped_at DESC"
-    rows = conn.execute(query, params).fetchall()
-    conn.close()
-    return [dict(row) for row in rows]
+    try:
+        query = "SELECT * FROM leads WHERE 1=1"
+        params = []
+        if category and category != "all":
+            query += " AND category = ?"
+            params.append(category)
+        if status and status != "all":
+            query += " AND status = ?"
+            params.append(status)
+        query += " ORDER BY scraped_at DESC"
+        rows = conn.execute(query, params).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
 
 def update_lead_status(lead_id: int, status: str, user_notes: str = None, db_path: str = "leads.db"):
     conn = sqlite3.connect(db_path)
