@@ -5,6 +5,7 @@ import json
 import os
 
 import uvicorn
+from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, StreamingResponse
@@ -15,16 +16,18 @@ from scraper import CATEGORIES, run_scrape_pipeline
 
 load_dotenv()
 
-app = FastAPI()
-app.mount("/static", StaticFiles(directory="static"), name="static")
-
 _scrape_queue: asyncio.Queue = asyncio.Queue()
 _scrape_task = None
 
 
-@app.on_event("startup")
-async def startup():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     init_db(os.getenv("DB_PATH", "leads.db"))
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 @app.get("/")
