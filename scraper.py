@@ -197,7 +197,7 @@ def process_business(biz: dict, category: str, db_path: str = "leads.db") -> Lea
 
 async def run_scrape_pipeline(category: str, limit: int, queue: asyncio.Queue, db_path: str = "leads.db"):
     google_results = await asyncio.to_thread(search_google_places, category, limit)
-    yelp_results = await asyncio.to_thread(search_yelp, category, limit)
+    yelp_results = await asyncio.to_thread(search_yelp, category, limit) if os.getenv("YELP_API_KEY") else []
 
     businesses = deduplicate(google_results + yelp_results)[:limit]
 
