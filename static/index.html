@@ -20,9 +20,11 @@
 <body>
   <h2>LA Lead Finder</h2>
 
+  <datalist id="category-options"></datalist>
+
   <div>
     <strong>Run Scrape:</strong>
-    <select id="scrape-category"></select>
+    <input id="scrape-category" type="text" list="category-options" placeholder="e.g. barber shops, tattoo parlors..." style="width:200px">
     <input id="scrape-location" type="text" value="Los Angeles CA" style="width:180px" title="e.g. Silver Lake Los Angeles, Koreatown LA">
     <input id="scrape-limit" type="number" value="50" min="1" max="500" style="width:70px">
     <button onclick="startScrape()">&#9654; Run Scrape</button>
@@ -71,10 +73,10 @@
 
     async function init() {
       const cats = await fetch('/api/categories').then(r => r.json());
-      const scrapeSel = document.getElementById('scrape-category');
+      const datalist = document.getElementById('category-options');
       const filterSel = document.getElementById('filter-category');
       cats.forEach(c => {
-        scrapeSel.innerHTML += `<option value="${c}">${c}</option>`;
+        datalist.innerHTML += `<option value="${c}">`;
         filterSel.innerHTML += `<option value="${c}">${c}</option>`;
       });
       loadLeads();
@@ -147,8 +149,9 @@
     }
 
     async function startScrape() {
-      const category = document.getElementById('scrape-category').value;
-      const location = document.getElementById('scrape-location').value || 'Los Angeles CA';
+      const category = document.getElementById('scrape-category').value.trim();
+      if (!category) { alert('Please enter a category to search for.'); return; }
+      const location = document.getElementById('scrape-location').value.trim() || 'Los Angeles CA';
       const limit = document.getElementById('scrape-limit').value;
       const resp = await fetch(`/api/scrape?category=${encodeURIComponent(category)}&location=${encodeURIComponent(location)}&limit=${limit}`, { method: 'POST' });
       const json = await resp.json();

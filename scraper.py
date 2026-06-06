@@ -22,6 +22,8 @@ CATEGORIES = [
     "lawn services",
     "bike repair shops",
     "watch repair shops",
+    "roofing companies",
+    "construction contractors",
 ]
 
 def check_website_quality(url: str) -> dict:
