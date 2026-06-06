@@ -47,10 +47,10 @@ def check_website_quality(url: str) -> dict:
     return {"flags": flags, "flag_count": len(flags)}
 
 
-def search_google_places(category: str, limit: int) -> list:
+def search_google_places(category: str, limit: int, location: str = "Los Angeles CA") -> list:
     gmaps = googlemaps.Client(key=os.getenv("GOOGLE_PLACES_API_KEY"))
     results = []
-    query = f"{category} in Los Angeles CA"
+    query = f"{category} in {location}"
     response = gmaps.places(query=query)
     results.extend(response.get("results", []))
 
@@ -112,11 +112,11 @@ def score_website_with_ai(url: str) -> dict:
     return {"score": None, "notes": "AI scoring failed", "email": ""}
 
 
-def search_yelp(category: str, limit: int) -> list:
+def search_yelp(category: str, limit: int, location: str = "Los Angeles, CA") -> list:
     headers = {"Authorization": f"Bearer {os.getenv('YELP_API_KEY')}"}
     params = {
         "term": category,
-        "location": "Los Angeles, CA",
+        "location": location,
         "limit": min(limit, 50),
     }
     response = requests.get(
@@ -195,9 +195,9 @@ def process_business(biz: dict, category: str, db_path: str = "leads.db") -> Lea
     return lead
 
 
-async def run_scrape_pipeline(category: str, limit: int, queue: asyncio.Queue, db_path: str = "leads.db"):
-    google_results = await asyncio.to_thread(search_google_places, category, limit)
-    yelp_results = await asyncio.to_thread(search_yelp, category, limit) if os.getenv("YELP_API_KEY") else []
+async def run_scrape_pipeline(category: str, limit: int, queue: asyncio.Queue, db_path: str = "leads.db", location: str = "Los Angeles CA"):
+    google_results = await asyncio.to_thread(search_google_places, category, limit, location)
+    yelp_results = await asyncio.to_thread(search_yelp, category, limit, location) if os.getenv("YELP_API_KEY") else []
 
     businesses = deduplicate(google_results + yelp_results)[:limit]
 

@@ -41,13 +41,13 @@ async def categories():
 
 
 @app.post("/api/scrape")
-async def start_scrape(category: str, limit: int, db_path: str = "leads.db"):
+async def start_scrape(category: str, limit: int, location: str = "Los Angeles CA", db_path: str = "leads.db"):
     global _scrape_task, _scrape_queue
     if _scrape_task and not _scrape_task.done():
         return {"error": "Scrape already running"}
     _scrape_queue = asyncio.Queue()
     _scrape_task = asyncio.create_task(
-        run_scrape_pipeline(category, limit, _scrape_queue, db_path)
+        run_scrape_pipeline(category, limit, _scrape_queue, db_path, location)
     )
     return {"status": "started"}
 
