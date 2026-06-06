@@ -3,6 +3,7 @@ import time
 import requests
 import googlemaps
 from bs4 import BeautifulSoup
+from scrapegraphai.graphs import SmartScraperGraph
 
 CATEGORIES = [
     "photographers",
@@ -67,6 +68,42 @@ def search_google_places(category: str, limit: int) -> list:
         })
 
     return businesses
+
+
+def score_website_with_ai(url: str) -> dict:
+    config = {
+        "llm": {
+            "api_key": os.getenv("OPENAI_API_KEY"),
+            "model": "openai/gpt-4o-mini",
+        },
+        "verbose": False,
+    }
+
+    graph = SmartScraperGraph(
+        prompt=(
+            "Analyze this business website and return a JSON object with exactly these keys: "
+            "score (integer 1-10, where 1=terrible and 10=professional/modern), "
+            "notes (one sentence explaining the score — mention specific problems like outdated design, "
+            "missing contact info, broken images, no portfolio), "
+            "email (any contact email found on the page, or empty string if none). "
+            "Return ONLY valid JSON, no other text."
+        ),
+        source=url,
+        config=config,
+    )
+
+    try:
+        result = graph.run()
+        if isinstance(result, dict):
+            return {
+                "score": int(result.get("score", 5)),
+                "notes": result.get("notes", ""),
+                "email": result.get("email", ""),
+            }
+    except Exception:
+        pass
+
+    return {"score": None, "notes": "AI scoring failed", "email": ""}
 
 
 def search_yelp(category: str, limit: int) -> list:

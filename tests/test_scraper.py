@@ -110,3 +110,32 @@ def test_search_yelp_handles_empty_response():
         results = search_yelp("coffee shops", limit=10)
 
     assert results == []
+
+from scraper import score_website_with_ai
+
+def test_score_website_with_ai_returns_score():
+    mock_graph = MagicMock()
+    mock_graph.run.return_value = {
+        "score": 3,
+        "notes": "Outdated design, no contact page",
+        "email": "owner@example.com",
+    }
+
+    with patch("scraper.SmartScraperGraph", return_value=mock_graph), \
+         patch.dict("os.environ", {"OPENAI_API_KEY": "fake-key"}):
+        result = score_website_with_ai("https://example.com")
+
+    assert result["score"] == 3
+    assert result["email"] == "owner@example.com"
+    assert "Outdated" in result["notes"]
+
+def test_score_website_with_ai_handles_failure():
+    mock_graph = MagicMock()
+    mock_graph.run.side_effect = Exception("LLM error")
+
+    with patch("scraper.SmartScraperGraph", return_value=mock_graph), \
+         patch.dict("os.environ", {"OPENAI_API_KEY": "fake-key"}):
+        result = score_website_with_ai("https://example.com")
+
+    assert result["score"] is None
+    assert result["email"] == ""
