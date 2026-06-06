@@ -87,11 +87,18 @@ def score_website_with_ai(url: str) -> dict:
 
     graph = SmartScraperGraph(
         prompt=(
-            "Analyze this business website and return a JSON object with exactly these keys: "
-            "score (integer 1-10, where 1=terrible and 10=professional/modern), "
-            "notes (one sentence explaining the score — mention specific problems like outdated design, "
-            "missing contact info, broken images, no portfolio), "
-            "email (any contact email found on the page, or empty string if none). "
+            "You are a brutally honest web design critic evaluating whether a small business website "
+            "is so bad that they need a professional redesign. Be harsh — most small business sites are terrible. "
+            "Analyze this website and return a JSON object with exactly these keys: "
+            "score (integer 1-10. Use this scale strictly: "
+            "1-2 = embarrassing, looks like 2005, broken or nearly unusable; "
+            "3-4 = very poor, template with no customization, missing key info, no real effort; "
+            "5-6 = mediocre, functional but forgettable, no trust signals, weak or no portfolio; "
+            "7-8 = decent, professional enough, could use polish but not urgent; "
+            "9-10 = genuinely impressive, modern design, clear branding, strong CTA — RARE, only award this if you would be proud to show it as a portfolio piece. "
+            "Most sites score 2-5. Do NOT round up to be nice.), "
+            "notes (one blunt sentence naming the specific problems — e.g. 'Squarespace template with stock photos, no real portfolio, contact form broken, last updated 2017'), "
+            "email (any contact email found on the page, empty string if none). "
             "Return ONLY valid JSON, no other text."
         ),
         source=url,

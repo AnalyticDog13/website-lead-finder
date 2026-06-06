@@ -72,7 +72,7 @@ def get_leads(db_path: str = "leads.db", category: str = None, status: str = Non
         if status and status != "all":
             query += " AND status = ?"
             params.append(status)
-        query += " ORDER BY scraped_at DESC"
+        query += " ORDER BY has_website ASC, COALESCE(quality_score, 0) ASC, scraped_at DESC"
         rows = conn.execute(query, params).fetchall()
         return [dict(row) for row in rows]
     finally:
