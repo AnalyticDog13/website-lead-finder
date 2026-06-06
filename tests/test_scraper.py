@@ -76,3 +76,37 @@ def test_search_google_places_handles_missing_fields():
 
     assert results[0]["phone"] == ""
     assert results[0]["website"] == ""
+
+from scraper import search_yelp
+
+def test_search_yelp_returns_list():
+    mock_response = MagicMock()
+    mock_response.json.return_value = {
+        "businesses": [
+            {
+                "name": "Silver Lake Coffee",
+                "phone": "+13235550001",
+                "location": {"display_address": ["123 Sunset Blvd", "Los Angeles, CA 90026"]},
+                "url": "https://yelp.com/biz/silver-lake-coffee",
+            }
+        ]
+    }
+
+    with patch("scraper.requests.get", return_value=mock_response), \
+         patch.dict("os.environ", {"YELP_API_KEY": "fake-key"}):
+        results = search_yelp("coffee shops", limit=1)
+
+    assert len(results) == 1
+    assert results[0]["name"] == "Silver Lake Coffee"
+    assert results[0]["phone"] == "+13235550001"
+    assert results[0]["source"] == "Yelp"
+
+def test_search_yelp_handles_empty_response():
+    mock_response = MagicMock()
+    mock_response.json.return_value = {"businesses": []}
+
+    with patch("scraper.requests.get", return_value=mock_response), \
+         patch.dict("os.environ", {"YELP_API_KEY": "fake-key"}):
+        results = search_yelp("coffee shops", limit=10)
+
+    assert results == []

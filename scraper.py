@@ -67,3 +67,27 @@ def search_google_places(category: str, limit: int) -> list:
         })
 
     return businesses
+
+
+def search_yelp(category: str, limit: int) -> list:
+    headers = {"Authorization": f"Bearer {os.getenv('YELP_API_KEY')}"}
+    params = {
+        "term": category,
+        "location": "Los Angeles, CA",
+        "limit": min(limit, 50),
+    }
+    response = requests.get(
+        "https://api.yelp.com/v3/businesses/search",
+        headers=headers,
+        params=params,
+    )
+    businesses = []
+    for biz in response.json().get("businesses", []):
+        businesses.append({
+            "name": biz.get("name", ""),
+            "phone": biz.get("phone", ""),
+            "website": "",
+            "address": ", ".join(biz.get("location", {}).get("display_address", [])),
+            "source": "Yelp",
+        })
+    return businesses
