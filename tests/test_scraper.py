@@ -196,7 +196,7 @@ def test_run_scrape_pipeline_streams_leads():
             business_name="Test", category="barber shop", phone="111",
             email="", website_url="", has_website=False, quality_score=None,
             quality_notes="", source="Google", address="LA",
-            status="lead", user_notes="", scraped_at=datetime.now(timezone.utc).isoformat(), id=1,
+            status="unreviewed", user_notes="", scraped_at=datetime.now(timezone.utc).isoformat(), id=1,
         )
         mock_process.return_value = mock_lead
 
