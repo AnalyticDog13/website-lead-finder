@@ -9,7 +9,7 @@ import uvicorn
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from fastapi import FastAPI
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from models import delete_leads_by_status, get_leads, init_db, update_lead_status
@@ -161,6 +161,32 @@ async def export_csv(db_path: str = "leads.db"):
         io.BytesIO(output.getvalue().encode()),
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=leads.csv"},
+    )
+
+
+@app.get("/api/export/unreviewed")
+async def export_unreviewed_csv():
+    leads = get_leads(status="unreviewed")
+    if not leads:
+        return Response(content="No unreviewed leads to export.", media_type="text/plain")
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=["business_name", "category", "phone", "email", "website_url", "address", "source", "scraped_at"])
+    writer.writeheader()
+    for lead in leads:
+        writer.writerow({
+            "business_name": lead.business_name,
+            "category": lead.category,
+            "phone": lead.phone,
+            "email": lead.email,
+            "website_url": lead.website_url,
+            "address": lead.address,
+            "source": lead.source,
+            "scraped_at": lead.scraped_at,
+        })
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=unreviewed_leads.csv"},
     )
 
 

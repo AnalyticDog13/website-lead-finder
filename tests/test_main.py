@@ -87,3 +87,30 @@ def test_get_neighborhoods_unknown_city_returns_la():
     assert response.status_code == 200
     data = response.json()
     assert len(data["neighborhoods"]) >= 20
+
+def test_export_unreviewed_returns_csv():
+    from unittest.mock import patch, MagicMock
+    from models import Lead
+    from datetime import datetime, timezone
+
+    mock_lead = Lead(
+        business_name="Unreviewed Co", category="barber shop", phone="555",
+        email="owner@unreviewedco.com", website_url="https://unreviewedco.com",
+        has_website=True, quality_score=None, quality_notes="",
+        source="Google", address="123 Main St",
+        status="unreviewed", user_notes="",
+        scraped_at=datetime.now(timezone.utc).isoformat(), id=1,
+    )
+    with patch("main.get_leads", return_value=[mock_lead]):
+        response = client.get("/api/export/unreviewed")
+    assert response.status_code == 200
+    assert "text/csv" in response.headers["content-type"]
+    assert "Unreviewed Co" in response.text
+    assert "owner@unreviewedco.com" in response.text
+
+def test_export_unreviewed_empty_returns_message():
+    from unittest.mock import patch
+    with patch("main.get_leads", return_value=[]):
+        response = client.get("/api/export/unreviewed")
+    assert response.status_code == 200
+    assert "No unreviewed" in response.text
