@@ -420,6 +420,8 @@ async def run_batch_pipeline(
         neighborhoods = LA_NEIGHBORHOODS
 
     total = len(neighborhoods)
+    import math
+    per_hood = max(1, math.ceil(limit / total))  # hard cap: limit total across all areas
     for i, neighborhood in enumerate(neighborhoods):
         location = f"{neighborhood}, {city}"
         await queue.put({
@@ -429,6 +431,6 @@ async def run_batch_pipeline(
             "total_neighborhoods": total,
             "message": f"Neighborhood {i + 1}/{total}: scanning {neighborhood}...",
         })
-        await run_scrape_pipeline(category, limit, queue, db_path, location, send_done=False)
+        await run_scrape_pipeline(category, per_hood, queue, db_path, location, send_done=False)
 
     await queue.put({"type": "done"})

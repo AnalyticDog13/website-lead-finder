@@ -146,17 +146,23 @@ async def update_settings(no_website_template: str = ""):
 
 @app.get("/api/export")
 async def export_csv(db_path: str = "leads.db"):
-    leads = get_leads(status="lead", db_path=db_path)
-    output = io.StringIO()
+    vetted = get_leads(status="lead", db_path=db_path)
+    unreviewed = get_leads(status="unreviewed", db_path=db_path)
+    all_leads = vetted + unreviewed
+    if not all_leads:
+        return Response(content="No leads to export.", media_type="text/plain")
     fields = [
         "id", "business_name", "category", "phone", "email",
-        "website_url", "has_website", "quality_score", "quality_notes",
-        "source", "address", "user_notes", "scraped_at",
-        "visited", "worth_reaching_out", "outreach_summary",
+        "website_url", "has_website", "source", "address",
+        "user_notes", "scraped_at", "visited", "worth_reaching_out", "reviewed",
     ]
+    output = io.StringIO()
     writer = csv.DictWriter(output, fieldnames=fields, extrasaction="ignore")
     writer.writeheader()
-    writer.writerows(leads)
+    for lead in all_leads:
+        row = dict(lead)
+        row["reviewed"] = 1 if lead["status"] == "lead" else 0
+        writer.writerow(row)
     output.seek(0)
     return StreamingResponse(
         io.BytesIO(output.getvalue().encode()),

@@ -62,8 +62,7 @@
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:8px">
-      <button onclick="exportCsv()">&#8595; Export CSV (leads only)</button>
-      <button onclick="exportUnreviewed()">&#8595; Export Unreviewed</button>
+      <button onclick="exportCsv()">&#8595; Export All Leads (CSV)</button>
     </div>
   </div>
 
@@ -83,21 +82,22 @@
     Category: <select id="filter-category" onchange="loadLeads()"><option value="all">All</option></select>
     &nbsp; Status: <select id="filter-status" onchange="loadLeads()">
       <option value="all">All</option>
-      <option value="lead">Lead</option>
       <option value="unreviewed">Unreviewed</option>
+      <option value="lead">Vetted</option>
       <option value="skipped">Skipped</option>
     </select>
   </div>
 
   <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px">
     <div class="tabs">
-      <button onclick="setTab('lead')" id="tab-lead">Auto-leads (<span id="count-lead">0</span>)</button>
-      <button onclick="setTab('unreviewed')" id="tab-unreviewed">Unreviewed Leads (<span id="count-unreviewed">0</span>)</button>
+      <button onclick="setTab('unreviewed')" id="tab-unreviewed" class="active">Unreviewed Leads (<span id="count-unreviewed">0</span>)</button>
+      <button onclick="setTab('lead')" id="tab-lead">Vetted Leads (<span id="count-lead">0</span>)</button>
       <button onclick="setTab('skipped')" id="tab-skipped">Skipped (<span id="count-skipped">0</span>)</button>
-      <button onclick="setTab('all')" id="tab-all" class="active">All (<span id="count-all">0</span>)</button>
+      <button onclick="setTab('all')" id="tab-all">All (<span id="count-all">0</span>)</button>
     </div>
     <div style="display:flex;gap:6px">
       <button onclick="clearStatus('unreviewed')" style="font-size:12px;color:#a00;border-color:#a00">&#x1F5D1; Clear unreviewed</button>
+      <button onclick="clearStatus('lead')" style="font-size:12px;color:#a00;border-color:#a00">&#x1F5D1; Clear vetted</button>
       <button onclick="clearStatus('skipped')" style="font-size:12px;color:#666;border-color:#999">&#x1F5D1; Clear skipped</button>
     </div>
   </div>
@@ -114,7 +114,7 @@
   </table>
 
   <script>
-    let currentTab = 'all';
+    let currentTab = 'unreviewed';
     let allLeads = [];
     let eventSource = null;
 
@@ -224,10 +224,10 @@
         <td style="text-align:center">${visitedCell}</td>
         <td>${worthCell}</td>
         <td>${notesCell}</td>
-        <td>${esc(lead.status)}</td>
+        <td>${lead.status === 'lead' ? 'vetted' : esc(lead.status)}</td>
         <td>
-          <button onclick="setStatus(${lead.id}, 'lead')">Lead</button>
-          <button onclick="setStatus(${lead.id}, 'skipped')">Skip</button>
+          ${lead.status !== 'lead' ? `<button onclick="setStatus(${lead.id}, 'lead')" style="color:#155724;border-color:#155724">&#10003; Vetted</button>` : ''}
+          ${lead.status !== 'skipped' ? `<button onclick="setStatus(${lead.id}, 'skipped')">Skip</button>` : ''}
         </td>
       `;
       return tr;
@@ -360,7 +360,7 @@
     }
 
     async function clearStatus(status) {
-      const label = status === 'unreviewed' ? 'unreviewed' : status;
+      const label = status === 'lead' ? 'vetted' : status;
       const count = allLeads.filter(l => l.status === status).length;
       if (count === 0) { alert(`No ${label} entries to clear.`); return; }
       if (!confirm(`Delete all ${count} ${label} entries? This cannot be undone.`)) return;
