@@ -1,15 +1,23 @@
 import asyncio
+import json
 import os
-import time
+import re
 from dataclasses import asdict
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 import requests
-import googlemaps
 from bs4 import BeautifulSoup
-from scrapegraphai.graphs import SmartScraperGraph
 
-from models import Lead, insert_lead
+from models import Lead, business_exists, insert_lead
+
+_EMAIL_RE = re.compile(r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}')
+_SKIP_EMAIL_DOMAINS = {
+    'example.com', 'sentry.io', 'wixpress.com', 'squarespace.com',
+    'wordpress.org', 'w3.org', 'schema.org', 'jquery.com', 'googleapis.com',
+    'cloudflare.com', 'bootstrapcdn.com', 'fontawesome.com', 'gstatic.com',
+}
+_SKIP_EMAIL_PREFIXES = ('noreply', 'no-reply', 'donotreply', 'bounce', 'mailer-daemon', 'postmaster', 'webmaster')
 
 CATEGORIES = [
     "photographers",
@@ -24,119 +32,244 @@ CATEGORIES = [
     "watch repair shops",
     "roofing companies",
     "construction contractors",
+    "med spas",
+    "plumbing companies",
+    "landscapers",
 ]
 
-def check_website_quality(url: str) -> dict:
-    flags = []
+CITY_NEIGHBORHOODS = {
+    "Los Angeles CA": [
+        "Silver Lake", "Echo Park", "Koreatown", "Boyle Heights",
+        "East Los Angeles", "West Hollywood", "Fairfax", "Crenshaw",
+        "Leimert Park", "Inglewood", "Compton", "Watts", "Hawthorne",
+        "Torrance", "Long Beach", "Culver City", "Palms", "Mar Vista",
+        "Venice", "Santa Monica", "Westchester", "Van Nuys",
+        "North Hollywood", "Reseda", "Chatsworth", "Burbank",
+        "Glendale", "Pasadena",
+    ],
+    "Riverside CA": [
+        "Downtown Riverside", "Canyon Crest", "La Sierra", "Wood Streets",
+        "Victoria", "Magnolia Center", "University", "Arlington",
+        "Eastside", "Hunter Park",
+    ],
+    "Greenville SC": [
+        "Downtown Greenville", "North Main", "Augusta Road", "Berea",
+        "Sans Souci", "Welcome", "Taylors", "Mauldin", "Simpsonville", "Greer",
+    ],
+    "Boise ID": [
+        "Downtown Boise", "North End", "Bench", "East End", "Warm Springs",
+        "Harris Ranch", "Garden City", "Meridian", "Nampa", "Eagle",
+    ],
+}
 
-    if not url.startswith("https://"):
-        flags.append("No HTTPS")
+CITIES = list(CITY_NEIGHBORHOODS.keys())
+LA_NEIGHBORHOODS = CITY_NEIGHBORHOODS["Los Angeles CA"]  # backward-compat alias
 
+_HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+
+
+
+def _decode_cloudflare_email(encoded: str) -> str:
+    """Decode Cloudflare's data-cfemail obfuscation."""
     try:
-        start = time.time()
-        response = requests.get(
-            url, timeout=10, headers={"User-Agent": "Mozilla/5.0"}
-        )
-        load_time = time.time() - start
+        r = int(encoded[:2], 16)
+        return ''.join(chr(int(encoded[i:i+2], 16) ^ r) for i in range(2, len(encoded), 2))
+    except Exception:
+        return ''
 
-        if load_time > 5:
-            flags.append(f"Slow load ({load_time:.1f}s)")
 
-        soup = BeautifulSoup(response.text, "html.parser")
-        viewport = soup.find("meta", attrs={"name": "viewport"})
-        if not viewport:
-            flags.append("No mobile viewport")
+def _is_valid_email(email: str) -> bool:
+    if '@' not in email or len(email) > 254:
+        return False
+    prefix, domain = email.rsplit('@', 1)
+    if domain in _SKIP_EMAIL_DOMAINS:
+        return False
+    if prefix.startswith(_SKIP_EMAIL_PREFIXES):
+        return False
+    if '.' not in domain or domain.endswith(('.png', '.jpg', '.gif', '.js', '.css')):
+        return False
+    return True
 
-    except Exception as e:
-        flags.append(f"Site unreachable: {str(e)[:50]}")
 
-    return {"flags": flags, "flag_count": len(flags)}
+def find_email_on_pages(base_url: str) -> str:
+    """
+    Scan the main page plus common contact/about/team paths for emails.
+    Checks structured data (JSON-LD, itemprop), Cloudflare obfuscation,
+    mailto: links, and footer/full-page regex. Returns the highest-confidence
+    email found.
+    """
+    paths = [
+        '', '/contact', '/contact-us',
+        '/about', '/about-us',
+        '/team', '/staff',
+        '/get-in-touch', '/connect', '/info',
+    ]
+    found_structured = []  # JSON-LD / itemprop — most explicit
+    found_cf = []           # Cloudflare decoded
+    found_mailto = []       # mailto: links
+    found_regex = []        # footer regex, then full-page regex
+
+    for path in paths:
+        try:
+            url = base_url.rstrip('/') + path
+            resp = requests.get(url, timeout=5, headers=_HEADERS)
+            if resp.status_code != 200:
+                continue
+            soup = BeautifulSoup(resp.text, 'html.parser')
+
+            # JSON-LD structured data (schema.org LocalBusiness etc.)
+            for script in soup.find_all('script', type='application/ld+json'):
+                try:
+                    data = json.loads(script.string or '')
+                    items = data if isinstance(data, list) else [data]
+                    for item in items:
+                        if isinstance(item, dict):
+                            e = str(item.get('email', '')).strip().lower()
+                            if e and _is_valid_email(e) and e not in found_structured:
+                                found_structured.append(e)
+                except Exception:
+                    pass
+
+            # itemprop="email" (microdata)
+            for el in soup.find_all(attrs={"itemprop": "email"}):
+                e = (el.get('content') or el.get_text()).strip().lower()
+                if _is_valid_email(e) and e not in found_structured:
+                    found_structured.append(e)
+
+            # Cloudflare obfuscation
+            for el in soup.find_all(attrs={"data-cfemail": True}):
+                e = _decode_cloudflare_email(el['data-cfemail']).lower()
+                if _is_valid_email(e) and e not in found_cf:
+                    found_cf.append(e)
+
+            # mailto: links
+            for a in soup.find_all('a', href=True):
+                href = a['href']
+                if href.lower().startswith('mailto:'):
+                    e = href[7:].split('?')[0].strip().lower()
+                    if _is_valid_email(e) and e not in found_mailto:
+                        found_mailto.append(e)
+
+            # Footer-first regex (footer often has cleanest contact info)
+            footer = soup.find('footer')
+            scan_targets = [footer.get_text() if footer else '', resp.text]
+            for text in scan_targets:
+                for e in _EMAIL_RE.findall(text):
+                    e = e.lower().rstrip('.')
+                    if _is_valid_email(e) and e not in found_regex:
+                        found_regex.append(e)
+
+        except Exception:
+            pass
+
+        # Stop scanning more paths once we have high-confidence results
+        if found_structured or found_cf or found_mailto:
+            break
+
+    combined = found_structured + found_cf + found_mailto + found_regex
+    return combined[0] if combined else ''
+
+
+def _search_web_for_email(business_name: str, website_url: str) -> str:
+    """
+    Search DuckDuckGo for a contact email for the business.
+    Used as a fallback when the website scan finds nothing.
+    Strongly prefers emails matching the business's own domain.
+    """
+    domain = ''
+    if website_url:
+        try:
+            domain = urlparse(website_url).netloc.lstrip('www.')
+        except Exception:
+            pass
+
+    queries = []
+    if domain:
+        queries.append(f'{business_name} {domain} contact email')
+    queries.append(f'"{business_name}" Los Angeles contact email')
+
+    for query in queries:
+        try:
+            resp = requests.get(
+                'https://html.duckduckgo.com/html/',
+                params={'q': query},
+                headers={**_HEADERS, 'Accept': 'text/html'},
+                timeout=5,
+            )
+            if resp.status_code != 200:
+                continue
+
+            domain_match = ''
+            first_valid = ''
+            for e in _EMAIL_RE.findall(resp.text):
+                e = e.lower().rstrip('.')
+                if not _is_valid_email(e):
+                    continue
+                if domain and e.endswith('@' + domain):
+                    domain_match = e
+                    break
+                if not first_valid:
+                    first_valid = e
+
+            if domain_match:
+                return domain_match
+            if first_valid:
+                return first_valid
+
+        except Exception:
+            pass
+
+    return ''
+
 
 
 def search_google_places(category: str, limit: int, location: str = "Los Angeles CA") -> list:
-    gmaps = googlemaps.Client(key=os.getenv("GOOGLE_PLACES_API_KEY"))
-    results = []
-    query = f"{category} in {location}"
-    response = gmaps.places(query=query)
-    results.extend(response.get("results", []))
-
-    while len(results) < limit and "next_page_token" in response:
-        time.sleep(2)  # Google requires 2s delay between page token requests
-        response = gmaps.places(query=query, page_token=response["next_page_token"])
-        results.extend(response.get("results", []))
-
+    api_key = os.getenv("GOOGLE_PLACES_API_KEY")
     businesses = []
-    for place in results[:limit]:
-        details = gmaps.place(
-            place["place_id"],
-            fields=["name", "formatted_phone_number", "website", "formatted_address"],
-        )["result"]
-        businesses.append({
-            "name": details.get("name", ""),
-            "phone": details.get("formatted_phone_number", ""),
-            "website": details.get("website", ""),
-            "address": details.get("formatted_address", ""),
-            "source": "Google",
-        })
+    page_token = None
 
-    return businesses
+    while len(businesses) < limit:
+        payload = {
+            "textQuery": f"{category} in {location}",
+            "maxResultCount": min(20, limit - len(businesses)),
+        }
+        if page_token:
+            payload["pageToken"] = page_token
 
+        response = requests.post(
+            "https://places.googleapis.com/v1/places:searchText",
+            json=payload,
+            headers={
+                "X-Goog-Api-Key": api_key,
+                "X-Goog-FieldMask": "places.displayName,places.formattedAddress,places.nationalPhoneNumber,places.websiteUri,nextPageToken",
+            },
+        )
+        data = response.json()
 
-def score_website_with_ai(url: str) -> dict:
-    config = {
-        "llm": {
-            "api_key": os.getenv("OPENAI_API_KEY"),
-            "model": "openai/gpt-4o-mini",
-        },
-        "verbose": False,
-    }
+        if "error" in data:
+            raise Exception(data["error"].get("message", str(data["error"])))
 
-    graph = SmartScraperGraph(
-        prompt=(
-            "You are a brutally honest web design critic evaluating whether a small business website "
-            "is so bad that they need a professional redesign. Be harsh — most small business sites are terrible. "
-            "Analyze this website and return a JSON object with exactly these keys: "
-            "score (integer 1-10. Use this scale strictly: "
-            "1-2 = embarrassing, looks like 2005, broken or nearly unusable; "
-            "3-4 = very poor, template with no customization, missing key info, no real effort; "
-            "5-6 = mediocre, functional but forgettable, no trust signals, weak or no portfolio; "
-            "7-8 = decent, professional enough, could use polish but not urgent; "
-            "9-10 = genuinely impressive, modern design, clear branding, strong CTA — RARE, only award this if you would be proud to show it as a portfolio piece. "
-            "Most sites score 2-5. Do NOT round up to be nice.), "
-            "notes (one blunt sentence naming the specific problems — e.g. 'Squarespace template with stock photos, no real portfolio, contact form broken, last updated 2017'), "
-            "email (any contact email found on the page, empty string if none). "
-            "Return ONLY valid JSON, no other text."
-        ),
-        source=url,
-        config=config,
-    )
+        places = data.get("places", [])
+        for place in places:
+            businesses.append({
+                "name": place.get("displayName", {}).get("text", ""),
+                "phone": place.get("nationalPhoneNumber", ""),
+                "website": place.get("websiteUri", ""),
+                "address": place.get("formattedAddress", ""),
+                "source": "Google",
+            })
 
-    try:
-        result = graph.run()
-        if isinstance(result, dict):
-            return {
-                "score": int(result.get("score", 5)),
-                "notes": result.get("notes", ""),
-                "email": result.get("email", ""),
-            }
-    except Exception:
-        pass
+        page_token = data.get("nextPageToken")
+        if not page_token or not places:
+            break
 
-    return {"score": None, "notes": "AI scoring failed", "email": ""}
+    return businesses[:limit]
 
 
 def search_yelp(category: str, limit: int, location: str = "Los Angeles, CA") -> list:
     headers = {"Authorization": f"Bearer {os.getenv('YELP_API_KEY')}"}
-    params = {
-        "term": category,
-        "location": location,
-        "limit": min(limit, 50),
-    }
-    response = requests.get(
-        "https://api.yelp.com/v3/businesses/search",
-        headers=headers,
-        params=params,
-    )
+    params = {"term": category, "location": location, "limit": min(limit, 50)}
+    response = requests.get("https://api.yelp.com/v3/businesses/search", headers=headers, params=params)
     businesses = []
     for biz in response.json().get("businesses", []):
         businesses.append({
@@ -160,34 +293,24 @@ def deduplicate(businesses: list) -> list:
     return unique
 
 
-def process_business(biz: dict, category: str, db_path: str = "leads.db") -> Lead:
+def process_business(biz: dict, category: str, db_path: str = "leads.db", progress_callback=None):
+    if business_exists(biz["name"], db_path):
+        return None
+
     website = biz.get("website", "")
     has_website = bool(website)
-    quality_score = None
-    quality_notes = ""
     email = ""
-    status = "review"
+    status = "lead" if not has_website else "review"
 
-    if not has_website:
-        status = "lead"
-        quality_notes = "No website"
-    else:
-        quality = check_website_quality(website)
-        flags = quality["flags"]
-        flag_count = quality["flag_count"]
-        quality_notes = " · ".join(flags) if flags else "Passed basic checks"
+    if has_website:
+        if progress_callback:
+            progress_callback("email_scan", f"Scanning site for email: {biz['name']}")
+        email = find_email_on_pages(website)
 
-        if flag_count >= 2:
-            status = "lead"
-        else:
-            ai = score_website_with_ai(website)
-            quality_score = ai["score"]
-            email = ai["email"]
-            if ai["notes"]:
-                quality_notes = f"{quality_notes} | AI: {ai['notes']}" if quality_notes else ai["notes"]
-
-            if quality_score is not None and quality_score >= 8:
-                status = "skipped"
+    if not email:
+        if progress_callback:
+            progress_callback("email_scan", f"Web searching for email: {biz['name']}")
+        email = _search_web_for_email(biz["name"], website)
 
     lead = Lead(
         business_name=biz["name"],
@@ -196,8 +319,8 @@ def process_business(biz: dict, category: str, db_path: str = "leads.db") -> Lea
         email=email,
         website_url=website,
         has_website=has_website,
-        quality_score=quality_score,
-        quality_notes=quality_notes,
+        quality_score=None,
+        quality_notes="",
         source=biz.get("source", ""),
         address=biz.get("address", ""),
         status=status,
@@ -208,20 +331,105 @@ def process_business(biz: dict, category: str, db_path: str = "leads.db") -> Lea
     return lead
 
 
-async def run_scrape_pipeline(category: str, limit: int, queue: asyncio.Queue, db_path: str = "leads.db", location: str = "Los Angeles CA"):
-    google_results = await asyncio.to_thread(search_google_places, category, limit, location)
-    yelp_results = await asyncio.to_thread(search_yelp, category, limit, location) if os.getenv("YELP_API_KEY") else []
+async def run_scrape_pipeline(
+    category: str,
+    limit: int,
+    queue: asyncio.Queue,
+    db_path: str = "leads.db",
+    location: str = "Los Angeles CA",
+    send_done: bool = True,
+):
+    await queue.put({
+        "type": "progress", "phase": "fetching", "current": 0, "total": limit,
+        "message": f"Fetching {category} from Google Places...",
+    })
+
+    loop = asyncio.get_event_loop()
+
+    try:
+        google_results = await asyncio.to_thread(search_google_places, category, limit, location)
+    except Exception as e:
+        print(f"[ERROR] Google Places: {e}")
+        await queue.put({"type": "error", "message": f"Google Places error: {e}"})
+        await queue.put({"type": "done"})
+        return
+
+    yelp_results = (
+        await asyncio.to_thread(search_yelp, category, limit, location)
+        if os.getenv("YELP_API_KEY") else []
+    )
 
     businesses = deduplicate(google_results + yelp_results)[:limit]
+    total = len(businesses)
+
+    if total == 0:
+        print(f"[WARN] No businesses returned for '{category}' in '{location}'")
+        await queue.put({"type": "error", "message": "No businesses found — check your API key and that the Places API is enabled."})
+        await queue.put({"type": "done"})
+        return
 
     for i, biz in enumerate(businesses):
         await queue.put({
-            "type": "progress",
-            "current": i + 1,
-            "total": len(businesses),
+            "type": "progress", "phase": "processing",
+            "current": i + 1, "total": total,
             "message": f"Processing {biz['name']}...",
         })
-        lead = await asyncio.to_thread(process_business, biz, category, db_path)
+
+        def make_phase_callback(idx, tot):
+            def callback(phase, message):
+                loop.call_soon_threadsafe(queue.put_nowait, {
+                    "type": "progress", "phase": phase,
+                    "current": idx + 1, "total": tot, "message": message,
+                })
+            return callback
+
+        try:
+            lead = await asyncio.wait_for(
+                asyncio.to_thread(
+                    process_business, biz, category, db_path, make_phase_callback(i, total)
+                ),
+                timeout=50,
+            )
+        except asyncio.TimeoutError:
+            await queue.put({"type": "progress", "phase": "processing",
+                             "current": i + 1, "total": total,
+                             "message": f"Timed out on {biz['name']}, moving on..."})
+            continue
+        except Exception as e:
+            await queue.put({"type": "progress", "phase": "processing",
+                             "current": i + 1, "total": total,
+                             "message": f"Skipped {biz['name']}: {e}"})
+            continue
+
+        if lead is None:
+            continue
         await queue.put({"type": "lead", **asdict(lead)})
+
+    if send_done:
+        await queue.put({"type": "done"})
+
+
+
+async def run_batch_pipeline(
+    category: str,
+    limit: int,
+    queue: asyncio.Queue,
+    db_path: str = "leads.db",
+    neighborhoods: list = None,
+):
+    if neighborhoods is None:
+        neighborhoods = LA_NEIGHBORHOODS
+
+    total = len(neighborhoods)
+    for i, neighborhood in enumerate(neighborhoods):
+        location = f"{neighborhood} Los Angeles CA"
+        await queue.put({
+            "type": "batch_progress",
+            "neighborhood": neighborhood,
+            "current_neighborhood": i + 1,
+            "total_neighborhoods": total,
+            "message": f"Neighborhood {i + 1}/{total}: scanning {neighborhood}...",
+        })
+        await run_scrape_pipeline(category, limit, queue, db_path, location, send_done=False)
 
     await queue.put({"type": "done"})

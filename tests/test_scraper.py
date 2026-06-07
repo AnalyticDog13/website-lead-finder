@@ -1,59 +1,77 @@
+import asyncio
 from unittest.mock import patch, MagicMock
-from scraper import check_website_quality
 
-def test_flags_missing_https():
-    result = check_website_quality("http://example.com")
-    assert "No HTTPS" in result["flags"]
+from scraper import (
+    find_email_on_pages,
+    search_google_places,
+    search_yelp,
+    deduplicate,
+    process_business,
+    run_scrape_pipeline,
+)
+from scraper import CITY_NEIGHBORHOODS, CITIES
 
-def test_flags_slow_load():
+
+def test_city_neighborhoods_has_four_cities():
+    assert set(CITIES) == {"Los Angeles CA", "Riverside CA", "Greenville SC", "Boise ID"}
+
+def test_each_city_has_neighborhoods():
+    for city, hoods in CITY_NEIGHBORHOODS.items():
+        assert len(hoods) >= 5, f"{city} has fewer than 5 neighborhoods"
+
+def test_la_neighborhoods_still_accessible():
+    from scraper import LA_NEIGHBORHOODS
+    assert len(LA_NEIGHBORHOODS) >= 20
+
+
+# --- find_email_on_pages ---
+
+def test_find_email_on_pages_finds_mailto():
     mock_response = MagicMock()
-    mock_response.text = "<html><head><meta name='viewport' content='width=device-width'></head></html>"
+    mock_response.status_code = 200
+    mock_response.text = '<a href="mailto:owner@testshop.com">Contact</a>'
+    with patch("scraper.requests.get", return_value=mock_response):
+        result = find_email_on_pages("https://testshop.com")
+    assert result == "owner@testshop.com"
 
-    with patch("scraper.requests.get", return_value=mock_response), \
-         patch("scraper.time.time", side_effect=[0, 6]):  # 6 second load
-        result = check_website_quality("https://slow-site.com")
-    assert "Slow load" in " ".join(result["flags"])
-
-def test_flags_missing_viewport():
+def test_find_email_on_pages_falls_back_to_regex():
     mock_response = MagicMock()
-    mock_response.text = "<html><head></head><body></body></html>"
+    mock_response.status_code = 200
+    mock_response.text = "Email us at hello@example.net for more info"
+    with patch("scraper.requests.get", return_value=mock_response):
+        result = find_email_on_pages("https://testshop.com")
+    assert result == "hello@example.net"
 
-    with patch("scraper.requests.get", return_value=mock_response), \
-         patch("scraper.time.time", side_effect=[0, 1]):
-        result = check_website_quality("https://example.com")
-    assert "No mobile viewport" in result["flags"]
-
-def test_no_flags_for_good_site():
+def test_find_email_on_pages_skips_junk_domains():
     mock_response = MagicMock()
-    mock_response.text = "<html><head><meta name='viewport' content='width=device-width'></head></html>"
+    mock_response.status_code = 200
+    mock_response.text = "track@sentry.io noreply@example.com real@mybiz.com"
+    with patch("scraper.requests.get", return_value=mock_response):
+        result = find_email_on_pages("https://testshop.com")
+    assert result == "real@mybiz.com"
 
-    with patch("scraper.requests.get", return_value=mock_response), \
-         patch("scraper.time.time", side_effect=[0, 1]):
-        result = check_website_quality("https://example.com")
-    assert result["flag_count"] == 0
+def test_find_email_on_pages_returns_empty_when_none():
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.text = "<p>No contact info here</p>"
+    with patch("scraper.requests.get", return_value=mock_response):
+        result = find_email_on_pages("https://testshop.com")
+    assert result == ""
 
-def test_flags_unreachable_site():
-    with patch("scraper.requests.get", side_effect=Exception("Connection refused")):
-        result = check_website_quality("https://dead-site.com")
-    assert any("unreachable" in f.lower() for f in result["flags"])
 
-from scraper import search_google_places
+# --- search_google_places ---
 
 def test_search_google_places_returns_list():
-    mock_client = MagicMock()
-    mock_client.places.return_value = {
-        "results": [{"place_id": "abc123", "name": "Test Barber"}]
+    mock_response = MagicMock()
+    mock_response.json.return_value = {
+        "places": [{
+            "displayName": {"text": "Test Barber"},
+            "nationalPhoneNumber": "(310) 555-0001",
+            "websiteUri": "http://testbarber.com",
+            "formattedAddress": "123 Main St, Los Angeles CA",
+        }]
     }
-    mock_client.place.return_value = {
-        "result": {
-            "name": "Test Barber",
-            "formatted_phone_number": "(310) 555-0001",
-            "website": "http://testbarber.com",
-            "formatted_address": "123 Main St, Los Angeles CA",
-        }
-    }
-
-    with patch("scraper.googlemaps.Client", return_value=mock_client), \
+    with patch("scraper.requests.post", return_value=mock_response), \
          patch.dict("os.environ", {"GOOGLE_PLACES_API_KEY": "fake-key"}):
         results = search_google_places("barber shops", limit=1)
 
@@ -64,34 +82,29 @@ def test_search_google_places_returns_list():
     assert results[0]["source"] == "Google"
 
 def test_search_google_places_handles_missing_fields():
-    mock_client = MagicMock()
-    mock_client.places.return_value = {
-        "results": [{"place_id": "abc123"}]
+    mock_response = MagicMock()
+    mock_response.json.return_value = {
+        "places": [{"displayName": {"text": "Bare Minimum Shop"}}]
     }
-    mock_client.place.return_value = {"result": {}}
-
-    with patch("scraper.googlemaps.Client", return_value=mock_client), \
+    with patch("scraper.requests.post", return_value=mock_response), \
          patch.dict("os.environ", {"GOOGLE_PLACES_API_KEY": "fake-key"}):
         results = search_google_places("barber shops", limit=1)
 
     assert results[0]["phone"] == ""
     assert results[0]["website"] == ""
 
-from scraper import search_yelp
+
+# --- search_yelp ---
 
 def test_search_yelp_returns_list():
     mock_response = MagicMock()
     mock_response.json.return_value = {
-        "businesses": [
-            {
-                "name": "Silver Lake Coffee",
-                "phone": "+13235550001",
-                "location": {"display_address": ["123 Sunset Blvd", "Los Angeles, CA 90026"]},
-                "url": "https://yelp.com/biz/silver-lake-coffee",
-            }
-        ]
+        "businesses": [{
+            "name": "Silver Lake Coffee",
+            "phone": "+13235550001",
+            "location": {"display_address": ["123 Sunset Blvd", "Los Angeles, CA 90026"]},
+        }]
     }
-
     with patch("scraper.requests.get", return_value=mock_response), \
          patch.dict("os.environ", {"YELP_API_KEY": "fake-key"}):
         results = search_yelp("coffee shops", limit=1)
@@ -104,44 +117,14 @@ def test_search_yelp_returns_list():
 def test_search_yelp_handles_empty_response():
     mock_response = MagicMock()
     mock_response.json.return_value = {"businesses": []}
-
     with patch("scraper.requests.get", return_value=mock_response), \
          patch.dict("os.environ", {"YELP_API_KEY": "fake-key"}):
         results = search_yelp("coffee shops", limit=10)
 
     assert results == []
 
-from scraper import score_website_with_ai
 
-def test_score_website_with_ai_returns_score():
-    mock_graph = MagicMock()
-    mock_graph.run.return_value = {
-        "score": 3,
-        "notes": "Outdated design, no contact page",
-        "email": "owner@example.com",
-    }
-
-    with patch("scraper.SmartScraperGraph", return_value=mock_graph), \
-         patch.dict("os.environ", {"OPENAI_API_KEY": "fake-key"}):
-        result = score_website_with_ai("https://example.com")
-
-    assert result["score"] == 3
-    assert result["email"] == "owner@example.com"
-    assert "Outdated" in result["notes"]
-
-def test_score_website_with_ai_handles_failure():
-    mock_graph = MagicMock()
-    mock_graph.run.side_effect = Exception("LLM error")
-
-    with patch("scraper.SmartScraperGraph", return_value=mock_graph), \
-         patch.dict("os.environ", {"OPENAI_API_KEY": "fake-key"}):
-        result = score_website_with_ai("https://example.com")
-
-    assert result["score"] is None
-    assert result["email"] == ""
-
-import asyncio
-from scraper import deduplicate, process_business, run_scrape_pipeline
+# --- deduplicate ---
 
 def test_deduplicate_removes_same_name():
     businesses = [
@@ -153,43 +136,51 @@ def test_deduplicate_removes_same_name():
     assert len(result) == 2
     assert result[0]["name"] == "Test Barber"
 
+
+# --- process_business ---
+
 def test_process_business_no_website_is_auto_lead():
     biz = {"name": "No Web Biz", "phone": "111", "website": "", "address": "LA", "source": "Google"}
-
-    with patch("scraper.check_website_quality") as mock_check, \
-         patch("scraper.score_website_with_ai") as mock_score, \
+    with patch("scraper.business_exists", return_value=False), \
+         patch("scraper.find_email_on_pages") as mock_email, \
          patch("scraper.insert_lead", return_value=1):
         result = process_business(biz, "barber shop")
 
     assert result.status == "lead"
     assert result.has_website is False
-    mock_check.assert_not_called()
-    mock_score.assert_not_called()
+    mock_email.assert_not_called()
 
-def test_process_business_two_flags_is_auto_lead():
-    biz = {"name": "Bad Site", "phone": "111", "website": "http://bad.com", "address": "LA", "source": "Google"}
-
-    with patch("scraper.check_website_quality", return_value={"flags": ["No HTTPS", "No mobile viewport"], "flag_count": 2}), \
-         patch("scraper.score_website_with_ai") as mock_score, \
+def test_process_business_with_website_goes_to_review():
+    biz = {"name": "Has Site", "phone": "111", "website": "https://hassite.com", "address": "LA", "source": "Google"}
+    with patch("scraper.business_exists", return_value=False), \
+         patch("scraper.find_email_on_pages", return_value=""), \
          patch("scraper.insert_lead", return_value=1):
         result = process_business(biz, "barber shop")
 
-    assert result.status == "lead"
-    mock_score.assert_not_called()
+    assert result.status == "review"
+    assert result.has_website is True
 
-def test_process_business_high_ai_score_is_skipped():
-    biz = {"name": "Good Site", "phone": "111", "website": "https://good.com", "address": "LA", "source": "Google"}
-
-    with patch("scraper.check_website_quality", return_value={"flags": [], "flag_count": 0}), \
-         patch("scraper.score_website_with_ai", return_value={"score": 9, "notes": "Great site", "email": ""}), \
+def test_process_business_scans_for_email():
+    biz = {"name": "Email Biz", "phone": "111", "website": "https://emailbiz.com", "address": "LA", "source": "Google"}
+    with patch("scraper.business_exists", return_value=False), \
+         patch("scraper.find_email_on_pages", return_value="found@emailbiz.com"), \
          patch("scraper.insert_lead", return_value=1):
         result = process_business(biz, "barber shop")
 
-    assert result.status == "skipped"
+    assert result.email == "found@emailbiz.com"
+
+def test_process_business_skips_duplicate():
+    biz = {"name": "Already There", "phone": "111", "website": "", "address": "LA", "source": "Google"}
+    with patch("scraper.business_exists", return_value=True):
+        result = process_business(biz, "barber shop")
+
+    assert result is None
+
+
+# --- run_scrape_pipeline ---
 
 def test_run_scrape_pipeline_streams_leads():
     biz = {"name": "Test", "phone": "111", "website": "", "address": "LA", "source": "Google"}
-
     with patch("scraper.search_google_places", return_value=[biz]), \
          patch("scraper.search_yelp", return_value=[]), \
          patch("scraper.process_business") as mock_process, \
@@ -200,7 +191,7 @@ def test_run_scrape_pipeline_streams_leads():
         mock_lead = Lead(
             business_name="Test", category="barber shop", phone="111",
             email="", website_url="", has_website=False, quality_score=None,
-            quality_notes="No website", source="Google", address="LA",
+            quality_notes="", source="Google", address="LA",
             status="lead", user_notes="", scraped_at=datetime.now(timezone.utc).isoformat(), id=1,
         )
         mock_process.return_value = mock_lead
@@ -214,4 +205,21 @@ def test_run_scrape_pipeline_streams_leads():
 
     types = [i["type"] for i in items]
     assert "lead" in types
+    assert "done" in types
+
+def test_run_scrape_pipeline_skips_none_leads():
+    biz = {"name": "Duplicate Biz", "phone": "111", "website": "", "address": "LA", "source": "Google"}
+    with patch("scraper.search_google_places", return_value=[biz]), \
+         patch("scraper.search_yelp", return_value=[]), \
+         patch("scraper.process_business", return_value=None):
+
+        queue = asyncio.Queue()
+        asyncio.run(run_scrape_pipeline("barber shop", 1, queue))
+
+        items = []
+        while not queue.empty():
+            items.append(queue.get_nowait())
+
+    types = [i["type"] for i in items]
+    assert "lead" not in types
     assert "done" in types
