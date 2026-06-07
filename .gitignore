@@ -1,9 +1,11 @@
 .env
-leads.db
-personal.db
+*.db
 PERSONAL.md
 personal_notes.*
 personal_settings.json
 __pycache__/
 *.pyc
 .pytest_cache/
+*.log
+*.csv
+settings.json
