@@ -153,8 +153,9 @@
 
     async function loadLeads() {
       const cat = document.getElementById('filter-category').value;
-      const status = document.getElementById('filter-status').value;
-      const data = await fetch(`/api/leads?category=${cat}&status=${status}`).then(r => r.json());
+      // Always fetch all statuses so tabs and counts are never starved.
+      // Status filter is applied client-side in renderTable().
+      const data = await fetch(`/api/leads?category=${cat}&status=all`).then(r => r.json());
       allLeads = data;
       renderTable();
       updateCounts(data);
@@ -175,7 +176,9 @@
     }
 
     function renderTable() {
-      const filtered = currentTab === 'all' ? allLeads : allLeads.filter(l => l.status === currentTab);
+      const statusFilter = document.getElementById('filter-status').value;
+      let filtered = currentTab === 'all' ? allLeads : allLeads.filter(l => l.status === currentTab);
+      if (statusFilter !== 'all') filtered = filtered.filter(l => l.status === statusFilter);
       const tbody = document.getElementById('leads-body');
       tbody.innerHTML = '';
       filtered.forEach(lead => tbody.appendChild(makeRow(lead)));
