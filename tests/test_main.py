@@ -90,19 +90,19 @@ def test_get_neighborhoods_unknown_city_returns_la():
     assert len(data) >= 20
 
 def test_export_unreviewed_returns_csv():
-    from unittest.mock import patch, MagicMock
-    from models import Lead
+    from unittest.mock import patch
     from datetime import datetime, timezone
 
-    mock_lead = Lead(
-        business_name="Unreviewed Co", category="barber shop", phone="555",
-        email="owner@unreviewedco.com", website_url="https://unreviewedco.com",
-        has_website=True, quality_score=None, quality_notes="",
-        source="Google", address="123 Main St",
-        status="unreviewed", user_notes="",
-        scraped_at=datetime.now(timezone.utc).isoformat(), id=1,
-    )
-    with patch("main.get_leads", return_value=[mock_lead]):
+    mock_lead_dict = {
+        "id": 1, "business_name": "Unreviewed Co", "category": "barber shop",
+        "phone": "555", "email": "owner@unreviewedco.com",
+        "website_url": "https://unreviewedco.com", "has_website": 1,
+        "quality_score": None, "quality_notes": "", "source": "Google",
+        "address": "123 Main St", "status": "unreviewed", "user_notes": "",
+        "scraped_at": datetime.now(timezone.utc).isoformat(),
+        "visited": 0, "worth_reaching_out": None, "outreach_summary": "",
+    }
+    with patch("main.get_leads", return_value=[mock_lead_dict]):
         response = client.get("/api/export/unreviewed")
     assert response.status_code == 200
     assert "text/csv" in response.headers["content-type"]

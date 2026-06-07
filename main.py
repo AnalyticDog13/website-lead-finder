@@ -166,26 +166,22 @@ async def export_csv(db_path: str = "leads.db"):
 
 
 @app.get("/api/export/unreviewed")
-async def export_unreviewed_csv():
-    leads = get_leads(status="unreviewed")
+async def export_unreviewed_csv(db_path: str = "leads.db"):
+    leads = get_leads(status="unreviewed", db_path=db_path)
     if not leads:
         return Response(content="No unreviewed leads to export.", media_type="text/plain")
     output = io.StringIO()
-    writer = csv.DictWriter(output, fieldnames=["business_name", "category", "phone", "email", "website_url", "address", "source", "scraped_at"])
+    fields = [
+        "id", "business_name", "category", "phone", "email",
+        "website_url", "has_website", "source", "address",
+        "user_notes", "scraped_at", "visited", "worth_reaching_out",
+    ]
+    writer = csv.DictWriter(output, fieldnames=fields, extrasaction="ignore")
     writer.writeheader()
-    for lead in leads:
-        writer.writerow({
-            "business_name": lead.business_name,
-            "category": lead.category,
-            "phone": lead.phone,
-            "email": lead.email,
-            "website_url": lead.website_url,
-            "address": lead.address,
-            "source": lead.source,
-            "scraped_at": lead.scraped_at,
-        })
-    return Response(
-        content=output.getvalue(),
+    writer.writerows(leads)
+    output.seek(0)
+    return StreamingResponse(
+        io.BytesIO(output.getvalue().encode()),
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=unreviewed_leads.csv"},
     )
