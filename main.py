@@ -3,6 +3,7 @@ import csv
 import io
 import json
 import os
+from typing import Optional
 
 import uvicorn
 from contextlib import asynccontextmanager
@@ -11,8 +12,8 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from models import get_leads, init_db, update_lead_status
-from scraper import CATEGORIES, run_scrape_pipeline
+from models import delete_leads_by_status, get_leads, init_db, update_lead_status
+from scraper import CATEGORIES, CITIES, CITY_NEIGHBORHOODS, LA_NEIGHBORHOODS, run_batch_pipeline, run_scrape_pipeline
 
 load_dotenv()
 
@@ -40,6 +41,18 @@ async def categories():
     return CATEGORIES
 
 
+@app.get("/api/cities")
+async def cities():
+    return {"cities": CITIES}
+
+
+@app.get("/api/neighborhoods")
+async def neighborhoods(city: str = None):
+    if city and city in CITY_NEIGHBORHOODS:
+        return {"neighborhoods": CITY_NEIGHBORHOODS[city]}
+    return {"neighborhoods": LA_NEIGHBORHOODS}
+
+
 @app.post("/api/scrape")
 async def start_scrape(category: str, limit: int, location: str = "Los Angeles CA", db_path: str = "leads.db"):
     global _scrape_task, _scrape_queue
@@ -52,6 +65,18 @@ async def start_scrape(category: str, limit: int, location: str = "Los Angeles C
     return {"status": "started"}
 
 
+@app.post("/api/batch")
+async def start_batch(category: str, limit: int, db_path: str = "leads.db"):
+    global _scrape_task, _scrape_queue
+    if _scrape_task and not _scrape_task.done():
+        return {"error": "Scrape already running"}
+    _scrape_queue = asyncio.Queue()
+    _scrape_task = asyncio.create_task(
+        run_batch_pipeline(category, limit, _scrape_queue, db_path)
+    )
+    return {"status": "started", "neighborhoods": len(LA_NEIGHBORHOODS)}
+
+
 @app.get("/api/stream")
 async def stream():
     async def event_generator():
@@ -60,7 +85,7 @@ async def stream():
             if item["type"] == "done":
                 yield "event: done\ndata: {}\n\n"
                 break
-            elif item["type"] == "progress":
+            elif item["type"] in ("progress", "batch_progress"):
                 yield f"event: progress\ndata: {json.dumps(item)}\n\n"
             else:
                 yield f"data: {json.dumps(item)}\n\n"
@@ -73,9 +98,48 @@ async def get_leads_endpoint(category: str = "all", status: str = "all", db_path
     return get_leads(db_path=db_path, category=category, status=status)
 
 
+@app.delete("/api/leads")
+async def clear_leads(status: str, db_path: str = "leads.db"):
+    count = delete_leads_by_status(status, db_path)
+    return {"deleted": count}
+
+
 @app.patch("/api/leads/{lead_id}")
-async def update_lead(lead_id: int, status: str, user_notes: str = None, db_path: str = "leads.db"):
-    update_lead_status(lead_id, status, user_notes, db_path)
+async def update_lead(
+    lead_id: int,
+    status: str,
+    user_notes: str = None,
+    visited: bool = None,
+    worth_reaching_out: Optional[bool] = None,
+    email: str = None,
+    db_path: str = "leads.db",
+):
+    update_lead_status(lead_id, status, user_notes, visited, worth_reaching_out, email, db_path)
+    return {"ok": True}
+
+
+
+SETTINGS_FILE = "personal_settings.json"
+
+def _load_settings() -> dict:
+    if os.path.exists(SETTINGS_FILE):
+        with open(SETTINGS_FILE) as f:
+            return json.load(f)
+    return {"no_website_template": ""}
+
+def _save_settings(settings: dict):
+    with open(SETTINGS_FILE, "w") as f:
+        json.dump(settings, f, indent=2)
+
+@app.get("/api/settings")
+async def get_settings():
+    return _load_settings()
+
+@app.patch("/api/settings")
+async def update_settings(no_website_template: str = ""):
+    settings = _load_settings()
+    settings["no_website_template"] = no_website_template
+    _save_settings(settings)
     return {"ok": True}
 
 
@@ -83,9 +147,12 @@ async def update_lead(lead_id: int, status: str, user_notes: str = None, db_path
 async def export_csv(db_path: str = "leads.db"):
     leads = get_leads(status="lead", db_path=db_path)
     output = io.StringIO()
-    fields = ["id", "business_name", "category", "phone", "email",
-              "website_url", "has_website", "quality_score", "quality_notes",
-              "source", "address", "user_notes", "scraped_at"]
+    fields = [
+        "id", "business_name", "category", "phone", "email",
+        "website_url", "has_website", "quality_score", "quality_notes",
+        "source", "address", "user_notes", "scraped_at",
+        "visited", "worth_reaching_out", "outreach_summary",
+    ]
     writer = csv.DictWriter(output, fieldnames=fields, extrasaction="ignore")
     writer.writeheader()
     writer.writerows(leads)

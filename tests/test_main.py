@@ -4,7 +4,6 @@ from fastapi.testclient import TestClient
 
 os.environ.setdefault("GOOGLE_PLACES_API_KEY", "fake")
 os.environ.setdefault("YELP_API_KEY", "fake")
-os.environ.setdefault("OPENAI_API_KEY", "fake")
 
 from main import app
 from models import init_db, insert_lead, Lead
@@ -61,3 +60,30 @@ def test_index_returns_html():
     response = client.get("/")
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
+
+def test_get_cities_returns_list():
+    response = client.get("/api/cities")
+    assert response.status_code == 200
+    data = response.json()
+    assert "cities" in data
+    assert set(data["cities"]) == {"Los Angeles CA", "Riverside CA", "Greenville SC", "Boise ID"}
+
+def test_get_neighborhoods_default_returns_la():
+    response = client.get("/api/neighborhoods")
+    assert response.status_code == 200
+    data = response.json()
+    assert "neighborhoods" in data
+    assert len(data["neighborhoods"]) >= 20
+
+def test_get_neighborhoods_with_city_param():
+    response = client.get("/api/neighborhoods?city=Riverside+CA")
+    assert response.status_code == 200
+    data = response.json()
+    assert "neighborhoods" in data
+    assert "Downtown Riverside" in data["neighborhoods"]
+
+def test_get_neighborhoods_unknown_city_returns_la():
+    response = client.get("/api/neighborhoods?city=Unknown+City")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["neighborhoods"]) >= 20
