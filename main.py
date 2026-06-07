@@ -43,14 +43,14 @@ async def categories():
 
 @app.get("/api/cities")
 async def cities():
-    return {"cities": CITIES}
+    return CITIES
 
 
 @app.get("/api/neighborhoods")
 async def neighborhoods(city: str = None):
     if city and city in CITY_NEIGHBORHOODS:
-        return {"neighborhoods": CITY_NEIGHBORHOODS[city]}
-    return {"neighborhoods": LA_NEIGHBORHOODS}
+        return CITY_NEIGHBORHOODS[city]
+    return LA_NEIGHBORHOODS
 
 
 @app.post("/api/scrape")
@@ -66,15 +66,16 @@ async def start_scrape(category: str, limit: int, location: str = "Los Angeles C
 
 
 @app.post("/api/batch")
-async def start_batch(category: str, limit: int, db_path: str = "leads.db"):
+async def start_batch(category: str, limit: int, city: str = "Los Angeles CA", db_path: str = "leads.db"):
     global _scrape_task, _scrape_queue
     if _scrape_task and not _scrape_task.done():
         return {"error": "Scrape already running"}
     _scrape_queue = asyncio.Queue()
+    neighborhoods = CITY_NEIGHBORHOODS.get(city, CITY_NEIGHBORHOODS["Los Angeles CA"])
     _scrape_task = asyncio.create_task(
-        run_batch_pipeline(category, limit, _scrape_queue, db_path)
+        run_batch_pipeline(category, limit, _scrape_queue, db_path, neighborhoods, city)
     )
-    return {"status": "started", "neighborhoods": len(LA_NEIGHBORHOODS)}
+    return {"status": "started", "city": city, "neighborhoods": len(neighborhoods)}
 
 
 @app.get("/api/stream")

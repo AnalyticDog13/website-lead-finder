@@ -65,28 +65,29 @@ def test_get_cities_returns_list():
     response = client.get("/api/cities")
     assert response.status_code == 200
     data = response.json()
-    assert "cities" in data
-    assert set(data["cities"]) == {"Los Angeles CA", "Riverside CA", "Greenville SC", "Boise ID"}
+    assert isinstance(data, list)
+    assert set(data) == {"Los Angeles CA", "Riverside CA", "Greenville SC", "Boise ID"}
 
 def test_get_neighborhoods_default_returns_la():
     response = client.get("/api/neighborhoods")
     assert response.status_code == 200
     data = response.json()
-    assert "neighborhoods" in data
-    assert len(data["neighborhoods"]) >= 20
+    assert isinstance(data, list)
+    assert len(data) >= 20
 
 def test_get_neighborhoods_with_city_param():
     response = client.get("/api/neighborhoods?city=Riverside+CA")
     assert response.status_code == 200
     data = response.json()
-    assert "neighborhoods" in data
-    assert "Downtown Riverside" in data["neighborhoods"]
+    assert isinstance(data, list)
+    assert "Downtown Riverside" in data
 
 def test_get_neighborhoods_unknown_city_returns_la():
     response = client.get("/api/neighborhoods?city=Unknown+City")
     assert response.status_code == 200
     data = response.json()
-    assert len(data["neighborhoods"]) >= 20
+    assert isinstance(data, list)
+    assert len(data) >= 20
 
 def test_export_unreviewed_returns_csv():
     from unittest.mock import patch, MagicMock

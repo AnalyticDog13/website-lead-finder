@@ -418,13 +418,14 @@ async def run_batch_pipeline(
     queue: asyncio.Queue,
     db_path: str = "leads.db",
     neighborhoods: list = None,
+    city: str = "Los Angeles CA",
 ):
     if neighborhoods is None:
         neighborhoods = LA_NEIGHBORHOODS
 
     total = len(neighborhoods)
     for i, neighborhood in enumerate(neighborhoods):
-        location = f"{neighborhood} Los Angeles CA"
+        location = f"{neighborhood}, {city}"
         await queue.put({
             "type": "batch_progress",
             "neighborhood": neighborhood,

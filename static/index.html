@@ -4,36 +4,58 @@
   <meta charset="UTF-8">
   <title>LA Lead Finder</title>
   <style>
-    body { font-family: sans-serif; padding: 20px; max-width: 1200px; margin: 0 auto; }
+    body { font-family: sans-serif; padding: 20px; max-width: 1400px; margin: 0 auto; }
     table { border-collapse: collapse; width: 100%; margin-top: 10px; }
-    th, td { border: 1px solid #ccc; padding: 6px 10px; text-align: left; font-size: 14px; }
+    th, td { border: 1px solid #ccc; padding: 6px 10px; text-align: left; font-size: 13px; }
     th { background: #f0f0f0; }
     .tabs { margin: 16px 0 4px; }
     .tabs button { margin-right: 4px; padding: 6px 14px; cursor: pointer; }
     .tabs button.active { font-weight: bold; background: #ddd; }
     #progress-bar { display: none; margin: 8px 0; }
-    #status-msg { font-size: 13px; color: #555; }
-    input[type=text] { width: 100%; box-sizing: border-box; }
+    #progress-wrap { display: flex; align-items: center; gap: 8px; }
+    #progress { flex: 1; }
+    #phase-badge {
+      font-size: 12px; font-weight: bold; padding: 2px 8px;
+      border-radius: 10px; white-space: nowrap;
+      background: #e0e0e0; color: #333;
+    }
+    #phase-badge.fetching     { background: #d0e8ff; color: #005faa; }
+    #phase-badge.processing   { background: #fff3cd; color: #856404; }
+    #phase-badge.quality_check{ background: #fde8b0; color: #7a5900; }
+    #phase-badge.ai_scoring   { background: #e0d0ff; color: #5500cc; }
+    #phase-badge.email_scan   { background: #d0f0e0; color: #155724; }
+    #phase-badge.batch_progress{ background: #cce5ff; color: #004085; }
+    #phase-badge.done         { background: #d4edda; color: #155724; }
+    #status-msg { font-size: 13px; color: #555; margin-top: 2px; }
     a { color: #0066cc; }
+    .visited-link { color: #888; text-decoration: line-through; }
+    .muted { color: #bbb; font-size: 12px; font-style: italic; }
+    details { margin: 12px 0; }
+    details summary { cursor: pointer; font-weight: bold; font-size: 13px; color: #555; }
+    #template-box { width: 100%; box-sizing: border-box; font-size: 13px; margin-top: 6px; }
   </style>
 </head>
 <body>
   <h2>LA Lead Finder</h2>
 
-  <datalist id="category-options"></datalist>
-
-  <div>
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <strong>Run Scrape:</strong>
-    <input id="scrape-category" type="text" list="category-options" placeholder="e.g. barber shops, tattoo parlors..." style="width:200px">
-    <input id="scrape-location" type="text" value="Los Angeles CA" style="width:180px" title="e.g. Silver Lake Los Angeles, Koreatown LA">
-    <input id="scrape-limit" type="number" value="50" min="1" max="500" style="width:70px">
+    <select id="scrape-category" style="width:200px"></select>
+    <select id="scrape-city" style="width:160px" onchange="loadNeighborhoods()"></select>
+    <select id="scrape-neighborhood" style="width:200px"></select>
+    <label style="font-size:13px">Limit: <input id="scrape-limit" type="number" value="20" min="1" max="500" style="width:55px"></label>
     <button onclick="startScrape()">&#9654; Run Scrape</button>
     <button onclick="exportCsv()">&#8595; Export CSV (leads only)</button>
+    <button onclick="exportUnreviewed()">&#8595; Export Unreviewed</button>
   </div>
 
   <div id="progress-bar">
-    <progress id="progress" value="0" max="100"></progress>
-    <span id="status-msg"></span>
+    <div id="progress-wrap">
+      <span id="phase-badge">—</span>
+      <progress id="progress" value="0" max="100"></progress>
+      <span id="progress-count" style="font-size:12px;color:#666;white-space:nowrap"></span>
+    </div>
+    <div id="status-msg"></div>
   </div>
 
   <hr>
@@ -44,23 +66,30 @@
     &nbsp; Status: <select id="filter-status" onchange="loadLeads()">
       <option value="all">All</option>
       <option value="lead">Lead</option>
-      <option value="review">Review Queue</option>
+      <option value="unreviewed">Unreviewed</option>
       <option value="skipped">Skipped</option>
     </select>
   </div>
 
-  <div class="tabs">
-    <button onclick="setTab('lead')" id="tab-lead">Auto-leads (<span id="count-lead">0</span>)</button>
-    <button onclick="setTab('review')" id="tab-review">Review Queue (<span id="count-review">0</span>)</button>
-    <button onclick="setTab('skipped')" id="tab-skipped">Skipped (<span id="count-skipped">0</span>)</button>
-    <button onclick="setTab('all')" id="tab-all" class="active">All (<span id="count-all">0</span>)</button>
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px">
+    <div class="tabs">
+      <button onclick="setTab('lead')" id="tab-lead">Auto-leads (<span id="count-lead">0</span>)</button>
+      <button onclick="setTab('unreviewed')" id="tab-unreviewed">Unreviewed Leads (<span id="count-unreviewed">0</span>)</button>
+      <button onclick="setTab('skipped')" id="tab-skipped">Skipped (<span id="count-skipped">0</span>)</button>
+      <button onclick="setTab('all')" id="tab-all" class="active">All (<span id="count-all">0</span>)</button>
+    </div>
+    <div style="display:flex;gap:6px">
+      <button onclick="clearStatus('unreviewed')" style="font-size:12px;color:#a00;border-color:#a00">&#x1F5D1; Clear unreviewed</button>
+      <button onclick="clearStatus('skipped')" style="font-size:12px;color:#666;border-color:#999">&#x1F5D1; Clear skipped</button>
+    </div>
   </div>
 
   <table id="leads-table">
     <thead>
       <tr>
         <th>Business</th><th>Category</th><th>Phone</th><th>Email</th>
-        <th>Website</th><th>Score</th><th>Notes (AI)</th><th>Your Notes</th><th>Status</th><th>Actions</th>
+        <th>Website</th><th>Visited</th><th>Worth It?</th>
+        <th>My Notes</th><th>Status</th><th>Actions</th>
       </tr>
     </thead>
     <tbody id="leads-body"></tbody>
@@ -72,14 +101,36 @@
     let eventSource = null;
 
     async function init() {
-      const cats = await fetch('/api/categories').then(r => r.json());
-      const datalist = document.getElementById('category-options');
+      const [cats, cities] = await Promise.all([
+        fetch('/api/categories').then(r => r.json()),
+        fetch('/api/cities').then(r => r.json()),
+      ]);
+
+      const catSel = document.getElementById('scrape-category');
       const filterSel = document.getElementById('filter-category');
       cats.forEach(c => {
-        datalist.innerHTML += `<option value="${c}">`;
+        catSel.innerHTML += `<option value="${c}">${c}</option>`;
         filterSel.innerHTML += `<option value="${c}">${c}</option>`;
       });
+
+      const citySel = document.getElementById('scrape-city');
+      cities.forEach(c => {
+        citySel.innerHTML += `<option value="${c}">${c}</option>`;
+      });
+
+      await loadNeighborhoods();
       loadLeads();
+    }
+
+    async function loadNeighborhoods() {
+      const city = document.getElementById('scrape-city').value;
+      const hoods = await fetch(`/api/neighborhoods?city=${encodeURIComponent(city)}`).then(r => r.json());
+      const sel = document.getElementById('scrape-neighborhood');
+      sel.innerHTML = `<option value="__batch__">All neighborhoods (batch)</option>
+        <option disabled>──────────────</option>`;
+      hoods.forEach(h => {
+        sel.innerHTML += `<option value="${h}">${h}</option>`;
+      });
     }
 
     async function loadLeads() {
@@ -94,7 +145,7 @@
     function updateCounts(leads) {
       document.getElementById('count-all').textContent = leads.length;
       document.getElementById('count-lead').textContent = leads.filter(l => l.status === 'lead').length;
-      document.getElementById('count-review').textContent = leads.filter(l => l.status === 'review').length;
+      document.getElementById('count-unreviewed').textContent = leads.filter(l => l.status === 'unreviewed').length;
       document.getElementById('count-skipped').textContent = leads.filter(l => l.status === 'skipped').length;
     }
 
@@ -114,18 +165,44 @@
 
     function makeRow(lead) {
       const tr = document.createElement('tr');
-      const siteLink = lead.website_url
-        ? `<a href="${lead.website_url}" target="_blank">${esc(lead.website_url.replace(/^https?:\/\//, '').slice(0, 30))}</a>`
+      const isVisited = lead.visited == 1 || lead.visited === true;
+      const worth = lead.worth_reaching_out;
+      const isWorthIt = worth == 1;
+      const hasWebsite = !!lead.website_url;
+
+      const siteLink = hasWebsite
+        ? `<a href="${lead.website_url}" target="_blank" class="${isVisited ? 'visited-link' : ''}"
+             onclick="markVisited(${lead.id}, '${esc(lead.status)}')"
+             >${esc(lead.website_url.replace(/^https?:\/\//, '').slice(0, 30))}</a>`
         : '<em>no website</em>';
+
+      const visitedCell = hasWebsite
+        ? `<input type="checkbox" ${isVisited ? 'checked' : ''} onchange="setVisited(${lead.id}, this.checked, '${esc(lead.status)}')">`
+        : '&mdash;';
+
+      const worthCell = `
+        <select onchange="setWorth(${lead.id}, this.value, '${esc(lead.status)}')">
+          <option value="" ${worth === null || worth === undefined ? 'selected' : ''}>—</option>
+          <option value="1" ${worth == 1 ? 'selected' : ''}>Yes</option>
+          <option value="0" ${worth == 0 ? 'selected' : ''}>No</option>
+        </select>`;
+
+      const notesCell = isWorthIt
+        ? `<textarea rows="3" style="width:160px;font-size:12px;box-sizing:border-box"
+              onblur="saveNotes(${lead.id}, this.value, '${esc(lead.status)}')">${esc(lead.user_notes)}</textarea>`
+        : `<span class="muted">mark Worth It first</span>`;
+
       tr.innerHTML = `
         <td>${esc(lead.business_name)}</td>
         <td>${esc(lead.category)}</td>
         <td>${esc(lead.phone)}</td>
-        <td>${esc(lead.email)}</td>
+        <td><input type="email" value="${esc(lead.email)}" placeholder="email"
+              onblur="saveEmail(${lead.id}, this.value, '${esc(lead.status)}')"
+              style="width:150px;font-size:12px"></td>
         <td>${siteLink}</td>
-        <td>${lead.quality_score !== null ? lead.quality_score + '/10' : '&mdash;'}</td>
-        <td style="max-width:200px;font-size:12px">${esc(lead.quality_notes)}</td>
-        <td><input type="text" value="${esc(lead.user_notes)}" onblur="saveNotes(${lead.id}, this.value, '${esc(lead.status)}')" style="width:120px"></td>
+        <td style="text-align:center">${visitedCell}</td>
+        <td>${worthCell}</td>
+        <td>${notesCell}</td>
         <td>${esc(lead.status)}</td>
         <td>
           <button onclick="setStatus(${lead.id}, 'lead')">Lead</button>
@@ -148,12 +225,53 @@
       await fetch(`/api/leads/${id}?status=${status}&user_notes=${encodeURIComponent(notes)}`, { method: 'PATCH' });
     }
 
+    async function markVisited(id, status) {
+      await fetch(`/api/leads/${id}?status=${status}&visited=true`, { method: 'PATCH' });
+      const lead = allLeads.find(l => l.id === id);
+      if (lead) { lead.visited = 1; renderTable(); }
+    }
+
+    async function setVisited(id, checked, status) {
+      await fetch(`/api/leads/${id}?status=${status}&visited=${checked}`, { method: 'PATCH' });
+      const lead = allLeads.find(l => l.id === id);
+      if (lead) { lead.visited = checked ? 1 : 0; renderTable(); }
+    }
+
+    async function saveEmail(id, email, status) {
+      await fetch(`/api/leads/${id}?status=${status}&email=${encodeURIComponent(email)}`, { method: 'PATCH' });
+      const lead = allLeads.find(l => l.id === id);
+      if (lead) lead.email = email;
+    }
+
+    async function setWorth(id, value, status) {
+      const newStatus = value === '0' ? 'skipped' : status;
+      let url = `/api/leads/${id}?status=${newStatus}`;
+      if (value === '1') url += '&worth_reaching_out=true';
+      else if (value === '0') url += '&worth_reaching_out=false';
+      await fetch(url, { method: 'PATCH' });
+
+      const lead = allLeads.find(l => l.id === id);
+      if (lead) {
+        lead.worth_reaching_out = value === '1' ? 1 : value === '0' ? 0 : null;
+        if (value === '0') lead.status = 'skipped';
+      }
+      renderTable();
+    }
+
     async function startScrape() {
-      const category = document.getElementById('scrape-category').value.trim();
-      if (!category) { alert('Please enter a category to search for.'); return; }
-      const location = document.getElementById('scrape-location').value.trim() || 'Los Angeles CA';
+      const category = document.getElementById('scrape-category').value;
+      const city = document.getElementById('scrape-city').value;
+      const neighborhood = document.getElementById('scrape-neighborhood').value;
       const limit = document.getElementById('scrape-limit').value;
-      const resp = await fetch(`/api/scrape?category=${encodeURIComponent(category)}&location=${encodeURIComponent(location)}&limit=${limit}`, { method: 'POST' });
+      const isBatch = neighborhood === '__batch__';
+      const location = isBatch ? city : `${neighborhood} ${city}`;
+
+      let resp;
+      if (isBatch) {
+        resp = await fetch(`/api/batch?category=${encodeURIComponent(category)}&limit=${limit}&city=${encodeURIComponent(city)}`, { method: 'POST' });
+      } else {
+        resp = await fetch(`/api/scrape?category=${encodeURIComponent(category)}&location=${encodeURIComponent(location)}&limit=${limit}`, { method: 'POST' });
+      }
       const json = await resp.json();
       if (json.error) { alert(json.error); return; }
 
@@ -161,28 +279,80 @@
       if (eventSource) eventSource.close();
       eventSource = new EventSource('/api/stream');
 
+      let hadError = false;
       eventSource.onmessage = (e) => {
-        const lead = JSON.parse(e.data);
-        allLeads.unshift(lead);
-        renderTable();
+        const msg = JSON.parse(e.data);
+        if (msg.type === 'error') {
+          hadError = true;
+          document.getElementById('status-msg').textContent = '❌ ' + msg.message;
+          document.getElementById('status-msg').style.color = '#c00';
+          return;
+        }
+        allLeads.unshift(msg);
         updateCounts(allLeads);
+        // Insert the new row without re-rendering (avoids clearing active inputs)
+        if (currentTab === 'all' || currentTab === msg.status) {
+          const tbody = document.getElementById('leads-body');
+          tbody.insertBefore(makeRow(msg), tbody.firstChild);
+        }
       };
+
+      const phaseLabels = {
+        fetching:       '🔍 Fetching',
+        processing:     '⚙️ Processing',
+        quality_check:  '📡 Checking site',
+        email_scan:     '📧 Scanning email',
+        ai_scoring:     '🤖 AI scoring',
+        batch_progress: '🗺️ Neighborhood',
+        done:           '✅ Done',
+      };
+
+      function setPhase(phase, message, current, total) {
+        const badge = document.getElementById('phase-badge');
+        badge.textContent = phaseLabels[phase] || phase;
+        badge.className = phase;
+        document.getElementById('status-msg').textContent = message || '';
+        if (total > 0) {
+          document.getElementById('progress').max = total;
+          document.getElementById('progress').value = current || 0;
+          document.getElementById('progress-count').textContent = current > 0 ? `${current} / ${total}` : '';
+        }
+      }
 
       eventSource.addEventListener('progress', (e) => {
         const d = JSON.parse(e.data);
-        document.getElementById('progress').max = d.total;
-        document.getElementById('progress').value = d.current;
-        document.getElementById('status-msg').textContent = d.message;
+        setPhase(d.phase || (d.type === 'batch_progress' ? 'batch_progress' : 'processing'),
+                 d.message, d.current, d.total);
       });
 
       eventSource.addEventListener('done', () => {
         eventSource.close();
-        document.getElementById('status-msg').textContent = 'Done!';
+        document.getElementById('progress-count').textContent = '';
+        if (!hadError) {
+          setPhase('done', 'Done!', 0, 0);
+        } else {
+          document.getElementById('phase-badge').textContent = '❌ Failed';
+          document.getElementById('phase-badge').className = '';
+        }
+        loadLeads();
       });
+    }
+
+    async function clearStatus(status) {
+      const label = status === 'unreviewed' ? 'unreviewed' : status;
+      const count = allLeads.filter(l => l.status === status).length;
+      if (count === 0) { alert(`No ${label} entries to clear.`); return; }
+      if (!confirm(`Delete all ${count} ${label} entries? This cannot be undone.`)) return;
+      await fetch(`/api/leads?status=${status}`, { method: 'DELETE' });
+      await loadLeads();
     }
 
     function exportCsv() {
       window.location = '/api/export';
+    }
+
+    function exportUnreviewed() {
+      window.location = '/api/export/unreviewed';
     }
 
     init();
