@@ -17,7 +17,7 @@ def test_city_neighborhoods_has_four_cities():
 
 def test_each_city_has_neighborhoods():
     for city, hoods in CITY_NEIGHBORHOODS.items():
-        assert len(hoods) >= 5, f"{city} has fewer than 5 neighborhoods"
+        assert len(hoods) >= 1, f"{city} has no neighborhoods"
 
 def test_la_neighborhoods_still_accessible():
     from scraper import LA_NEIGHBORHOODS

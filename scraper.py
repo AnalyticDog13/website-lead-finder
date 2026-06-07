@@ -52,17 +52,13 @@ CITY_NEIGHBORHOODS = {
         "Glendale", "Pasadena",
     ],
     "Riverside CA": [
-        "Downtown Riverside", "Canyon Crest", "La Sierra", "Wood Streets",
-        "Victoria", "Magnolia Center", "University", "Arlington",
-        "Eastside", "Hunter Park",
+        "Downtown Riverside", "Arlington", "La Sierra",
     ],
     "Greenville SC": [
-        "Downtown Greenville", "North Main", "Augusta Road", "Berea",
-        "Sans Souci", "Welcome", "Taylors", "Mauldin", "Simpsonville", "Greer",
+        "Downtown Greenville", "Augusta Road", "Greer",
     ],
     "Boise ID": [
-        "Downtown Boise", "North End", "Bench", "East End", "Warm Springs",
-        "Harris Ranch", "Garden City", "Meridian", "Nampa", "Eagle",
+        "Downtown Boise", "Meridian", "Nampa",
     ],
 }
 
