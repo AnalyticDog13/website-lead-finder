@@ -16,6 +16,10 @@ _SKIP_EMAIL_DOMAINS = {
     'example.com', 'sentry.io', 'wixpress.com', 'squarespace.com',
     'wordpress.org', 'w3.org', 'schema.org', 'jquery.com', 'googleapis.com',
     'cloudflare.com', 'bootstrapcdn.com', 'fontawesome.com', 'gstatic.com',
+    'contact.com', 'ex.com', 'help.com', 'email.com', 'mail.com',
+    'domain.com', 'website.com', 'company.com', 'placeholder.com',
+    'yourwebsite.com', 'yourdomain.com', 'youremail.com', 'acme.com',
+    'example.org', 'example.net', 'test.com', 'test.org', 'sample.com',
 }
 _SKIP_EMAIL_PREFIXES = ('noreply', 'no-reply', 'donotreply', 'bounce', 'mailer-daemon', 'postmaster', 'webmaster')
 
@@ -174,7 +178,8 @@ def _search_web_for_email(business_name: str, website_url: str) -> str:
     """
     Search DuckDuckGo for a contact email for the business.
     Used as a fallback when the website scan finds nothing.
-    Strongly prefers emails matching the business's own domain.
+    If the business has a website, only returns emails matching its domain.
+    If no website, accepts any valid non-blocked email.
     """
     domain = ''
     if website_url:
@@ -183,43 +188,38 @@ def _search_web_for_email(business_name: str, website_url: str) -> str:
         except Exception:
             pass
 
-    queries = []
-    if domain:
-        queries.append(f'{business_name} {domain} contact email')
-    queries.append(f'"{business_name}" Los Angeles contact email')
+    query = f'{business_name} {domain} contact email' if domain else f'"{business_name}" contact email'
 
-    for query in queries:
-        try:
-            resp = requests.get(
-                'https://html.duckduckgo.com/html/',
-                params={'q': query},
-                headers={**_HEADERS, 'Accept': 'text/html'},
-                timeout=5,
-            )
-            if resp.status_code != 200:
+    try:
+        resp = requests.get(
+            'https://html.duckduckgo.com/html/',
+            params={'q': query},
+            headers={**_HEADERS, 'Accept': 'text/html'},
+            timeout=5,
+        )
+        if resp.status_code != 200:
+            return ''
+
+        domain_match = ''
+        first_valid = ''
+        for e in _EMAIL_RE.findall(resp.text):
+            e = e.lower().rstrip('.')
+            if not _is_valid_email(e):
                 continue
+            if domain and e.endswith('@' + domain):
+                domain_match = e
+                break
+            if not first_valid:
+                first_valid = e
 
-            domain_match = ''
-            first_valid = ''
-            for e in _EMAIL_RE.findall(resp.text):
-                e = e.lower().rstrip('.')
-                if not _is_valid_email(e):
-                    continue
-                if domain and e.endswith('@' + domain):
-                    domain_match = e
-                    break
-                if not first_valid:
-                    first_valid = e
+        if domain_match:
+            return domain_match
+        if not domain:  # no-website case: accept any valid email
+            return first_valid
+        return ''  # has website but no domain match: reject
 
-            if domain_match:
-                return domain_match
-            if first_valid:
-                return first_valid
-
-        except Exception:
-            pass
-
-    return ''
+    except Exception:
+        return ''
 
 
 

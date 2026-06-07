@@ -37,10 +37,10 @@ def test_find_email_on_pages_finds_mailto():
 def test_find_email_on_pages_falls_back_to_regex():
     mock_response = MagicMock()
     mock_response.status_code = 200
-    mock_response.text = "Email us at hello@example.net for more info"
+    mock_response.text = "Email us at hello@mybiz.net for more info"
     with patch("scraper.requests.get", return_value=mock_response):
         result = find_email_on_pages("https://testshop.com")
-    assert result == "hello@example.net"
+    assert result == "hello@mybiz.net"
 
 def test_find_email_on_pages_skips_junk_domains():
     mock_response = MagicMock()
@@ -223,3 +223,49 @@ def test_run_scrape_pipeline_skips_none_leads():
     types = [i["type"] for i in items]
     assert "lead" not in types
     assert "done" in types
+
+
+# --- _search_web_for_email ---
+
+def test_search_web_returns_domain_match_when_has_website():
+    biz_name = "Test Shop"
+    website = "https://testshop.com"
+    fake_html = "contact us at owner@testshop.com for details"
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = fake_html
+    with patch("scraper.requests.get", return_value=mock_resp):
+        from scraper import _search_web_for_email
+        result = _search_web_for_email(biz_name, website)
+    assert result == "owner@testshop.com"
+
+def test_search_web_rejects_non_domain_email_when_has_website():
+    biz_name = "Test Shop"
+    website = "https://testshop.com"
+    fake_html = "email us at random@otherdomain.com"
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = fake_html
+    with patch("scraper.requests.get", return_value=mock_resp):
+        from scraper import _search_web_for_email
+        result = _search_web_for_email(biz_name, website)
+    assert result == ""
+
+def test_search_web_accepts_any_email_when_no_website():
+    biz_name = "No Website Biz"
+    website = ""
+    fake_html = "contact: owner@gmail.com"
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = fake_html
+    with patch("scraper.requests.get", return_value=mock_resp):
+        from scraper import _search_web_for_email
+        result = _search_web_for_email(biz_name, website)
+    assert result == "owner@gmail.com"
+
+def test_skip_email_domains_includes_placeholders():
+    from scraper import _SKIP_EMAIL_DOMAINS
+    assert 'contact.com' in _SKIP_EMAIL_DOMAINS
+    assert 'help.com' in _SKIP_EMAIL_DOMAINS
+    assert 'example.org' in _SKIP_EMAIL_DOMAINS
+    assert 'test.com' in _SKIP_EMAIL_DOMAINS
