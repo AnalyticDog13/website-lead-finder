@@ -139,42 +139,46 @@ def test_deduplicate_removes_same_name():
 
 # --- process_business ---
 
-def test_process_business_no_website_is_auto_lead():
-    biz = {"name": "No Web Biz", "phone": "111", "website": "", "address": "LA", "source": "Google"}
-    with patch("scraper.business_exists", return_value=False), \
-         patch("scraper.find_email_on_pages") as mock_email, \
-         patch("scraper.insert_lead", return_value=1):
-        result = process_business(biz, "barber shop")
-
-    assert result.status == "lead"
-    assert result.has_website is False
-    mock_email.assert_not_called()
-
-def test_process_business_with_website_goes_to_review():
-    biz = {"name": "Has Site", "phone": "111", "website": "https://hassite.com", "address": "LA", "source": "Google"}
+def test_process_business_returns_none_if_no_email():
+    biz = {"name": "No Email Biz", "phone": "111", "website": "https://noemail.com", "address": "LA", "source": "Google"}
     with patch("scraper.business_exists", return_value=False), \
          patch("scraper.find_email_on_pages", return_value=""), \
-         patch("scraper.insert_lead", return_value=1):
+         patch("scraper._search_web_for_email", return_value=""):
         result = process_business(biz, "barber shop")
+    assert result is None
 
-    assert result.status == "review"
-    assert result.has_website is True
-
-def test_process_business_scans_for_email():
-    biz = {"name": "Email Biz", "phone": "111", "website": "https://emailbiz.com", "address": "LA", "source": "Google"}
+def test_process_business_returns_none_if_no_email_no_website():
+    biz = {"name": "No Site Biz", "phone": "111", "website": "", "address": "LA", "source": "Google"}
     with patch("scraper.business_exists", return_value=False), \
-         patch("scraper.find_email_on_pages", return_value="found@emailbiz.com"), \
+         patch("scraper._search_web_for_email", return_value=""):
+        result = process_business(biz, "barber shop")
+    assert result is None
+
+def test_process_business_saves_with_unreviewed_status():
+    biz = {"name": "Good Biz", "phone": "111", "website": "https://goodbiz.com", "address": "LA", "source": "Google"}
+    with patch("scraper.business_exists", return_value=False), \
+         patch("scraper.find_email_on_pages", return_value="owner@goodbiz.com"), \
          patch("scraper.insert_lead", return_value=1):
         result = process_business(biz, "barber shop")
-
-    assert result.email == "found@emailbiz.com"
+    assert result is not None
+    assert result.status == "unreviewed"
+    assert result.email == "owner@goodbiz.com"
 
 def test_process_business_skips_duplicate():
     biz = {"name": "Already There", "phone": "111", "website": "", "address": "LA", "source": "Google"}
     with patch("scraper.business_exists", return_value=True):
         result = process_business(biz, "barber shop")
-
     assert result is None
+
+def test_process_business_uses_web_search_fallback():
+    biz = {"name": "Fallback Biz", "phone": "111", "website": "https://fallbackbiz.com", "address": "LA", "source": "Google"}
+    with patch("scraper.business_exists", return_value=False), \
+         patch("scraper.find_email_on_pages", return_value=""), \
+         patch("scraper._search_web_for_email", return_value="owner@fallbackbiz.com"), \
+         patch("scraper.insert_lead", return_value=1):
+        result = process_business(biz, "barber shop")
+    assert result is not None
+    assert result.email == "owner@fallbackbiz.com"
 
 
 # --- run_scrape_pipeline ---

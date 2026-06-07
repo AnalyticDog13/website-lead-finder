@@ -300,7 +300,6 @@ def process_business(biz: dict, category: str, db_path: str = "leads.db", progre
     website = biz.get("website", "")
     has_website = bool(website)
     email = ""
-    status = "lead" if not has_website else "review"
 
     if has_website:
         if progress_callback:
@@ -311,6 +310,9 @@ def process_business(biz: dict, category: str, db_path: str = "leads.db", progre
         if progress_callback:
             progress_callback("email_scan", f"Web searching for email: {biz['name']}")
         email = _search_web_for_email(biz["name"], website)
+
+    if not email:
+        return None  # No email found — skip entirely
 
     lead = Lead(
         business_name=biz["name"],
@@ -323,7 +325,7 @@ def process_business(biz: dict, category: str, db_path: str = "leads.db", progre
         quality_notes="",
         source=biz.get("source", ""),
         address=biz.get("address", ""),
-        status=status,
+        status="unreviewed",
         user_notes="",
         scraped_at=datetime.now(timezone.utc).isoformat(),
     )
